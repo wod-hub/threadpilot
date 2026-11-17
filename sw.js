@@ -1,7 +1,7 @@
 /* ThreadPilot 서비스 워커 — 정적 앱 셸만 캐시합니다.
    /api/* · /oauth/* 는 절대 캐시하지 않고 항상 네트워크로 통과시킵니다.
    (세션 쿠키·OAuth 콜백·발행 결과가 캐시에 가려지면 안 됩니다) */
-const CACHE = 'threadpilot-v6';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
+const CACHE = 'threadpilot-v7';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
 const ASSETS = [
   './',
   './index.html',
@@ -36,7 +36,7 @@ self.addEventListener('fetch', event => {
 
   // 2) 화면·스크립트는 네트워크 우선(배포 직후 바로 반영), 오프라인이면 캐시.
   const isShell = req.mode === 'navigate' || url.pathname === '/' ||
-    /\/(index\.html|app\.js|sw\.js)$/.test(url.pathname);
+    /\/(index\.html|app\.js|sw\.js)(\?|$)/.test(url.pathname);
   if (isShell) {
     event.respondWith(
       fetch(req, { cache: 'no-store' }).then(res => {
