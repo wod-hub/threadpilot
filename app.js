@@ -12,6 +12,8 @@
   // 사업자번호·연락처 같은 정보는 실제 확인된 값이 없으므로 화면에 쓰지 않습니다.
   const OPERATOR = { ko: '붐비다', en: 'BUMBIDA', studio: '붐비다 자동화 스튜디오' };
   const OP_LINE = '운영 · ' + OPERATOR.ko + ' (' + OPERATOR.en + ')';
+  // 실제 붐비다 로고 — bumbida.com 공식 SVG. 운영사 표기 옆에 이 파일을 그대로 씁니다.
+  const OP_LOGO = 'icons/bumbida-logo.svg';
 
   /* ---------------------------------------------------------------- 상수 */
   const TONES = [
@@ -734,6 +736,11 @@
   function markSvg(size) {
     return '<svg width="' + (size || 15) + '" height="' + (size || 15) + '" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"><path d="M3.6 5.1h8.8M3.6 8h5.4M3.6 10.9h8.8"/></svg>';
   }
+  // 붐비다 실제 로고 이미지 — 옆에 운영사 이름이 글자로 있으므로 장식으로 둡니다(alt 비움)
+  function opLogo(size, cls) {
+    const s = size || 15;
+    return '<img class="op-logo' + (cls ? ' ' + cls : '') + '" src="' + OP_LOGO + '" alt="" width="' + s + '" height="' + s + '" decoding="async">';
+  }
 
   /* ---------------------------------------------------------------- 생성 */
   function hitsBanned(text) {
@@ -1136,7 +1143,7 @@
 
   // 편집: 로그인·회원가입 상단 워드마크 아래 운영사 표기
   function authByline() {
-    return '<p class="auth-by"><span class="by-k">by</span><b>' + OPERATOR.ko + '</b><span class="by-en">' + OPERATOR.en + '</span></p>';
+    return '<p class="auth-by">' + opLogo(15) + '<span class="by-k">by</span><b>' + OPERATOR.ko + '</b><span class="by-en">' + OPERATOR.en + '</span></p>';
   }
 
   function authFooterNote() {
@@ -1149,7 +1156,7 @@
   // 편집: 설정·요금제 화면 하단 운영사 푸터
   function operatorFooter() {
     return '<div class="op-sign">' +
-      '<span class="os-mark">' + markSvg(11) + '</span>' +
+      opLogo(20, 'os-logo') +
       '<span class="os-t">ThreadPilot ' + esc(OP_LINE) + '</span>' +
     '</div>';
   }
@@ -1215,7 +1222,7 @@
     const acc = activeAccount();
     return '<div class="onboard">' +
       '<div class="mark-lg">' + markSvg(26) + '</div>' +
-      '<p class="onboard-kicker">ThreadPilot · ' + OPERATOR.studio + '</p>' +
+      '<p class="onboard-kicker">' + opLogo(13) + '<span>ThreadPilot · ' + OPERATOR.studio + '</span></p>' +
       '<h1>스레드는 알아서<br>돌아갑니다</h1>' +
       '<p class="lead">주제와 말투만 정해두면 정한 시간에 글이 올라가고,<br>댓글에는 같은 톤으로 답글이 달립니다.</p>' +
       '<div class="queue-card">' +
@@ -1245,7 +1252,7 @@
         '</ul>' +
         (acc ? '<p class="small" style="margin-top:16px">이미 연결된 계정: ' + esc(acc.name) + ' ' + esc(acc.handle) + '</p>' : '') +
         '<div class="connect-sign">' +
-          '<p class="cs-line">Powered by <b>' + OPERATOR.ko + '</b><span class="cs-en">' + OPERATOR.en + '</span></p>' +
+          '<p class="cs-line">' + opLogo(13) + '<span>Powered by <b>' + OPERATOR.ko + '</b></span><span class="cs-en">' + OPERATOR.en + '</span></p>' +
           '<p class="cs-sub">© 2026 ThreadPilot · ' + OPERATOR.studio + ' · 데모 프로토타입</p>' +
         '</div>' +
       '</div>' +
@@ -1579,7 +1586,7 @@
         '<button class="set-row" data-act="reset"><span class="ic">' + icon('refresh', 16) + '</span>' +
         '<div><div class="lab">데모 데이터 초기화</div><div class="desc">계정 연결·예약·로그를 지우고 처음으로 (로그인 유지)</div></div></button>' +
         '<div class="set-row static"><span class="ic">' + icon('shield', 16) + '</span>' +
-        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 0.9.1 (프로토타입)</div></div></div>' +
+        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 0.9.2 (프로토타입)</div></div></div>' +
       '</div>' +
       '<button class="btn line block" data-act="logout" style="margin-top:16px;color:var(--accent-deep)">' + icon('user', 16) + '로그아웃</button>' +
       '<p class="fine" style="margin-top:12px">' + (me.email ? esc(me.email) + ' 로 로그인됨 · ' : '') + '데모 모드입니다. 실제 스레드 계정에는 게시되지 않습니다.</p>' +

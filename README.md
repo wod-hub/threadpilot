@@ -5,6 +5,7 @@
 **실제 스레드 계정에는 아무 것도 게시되지 않습니다**(발행은 시뮬레이션).
 
 - v0.9.1: 로그인/회원가입 게이트 · 반말/존댓말 토글 · 스레드 계정 연결 화면의 메타 계정 복구 링크
+- v0.9.2: 운영사 표기에 실제 붐비다 로고 적용 — `icons/bumbida-logo.svg`(bumbida.com 공식 `logo.svg`와 동일 파일)를 로그인/회원가입 `by 붐비다`, 연결 화면 kicker·`Powered by 붐비다`, 설정·요금제 푸터에 넣음. 서비스 워커 캐시를 `threadpilot-v4`로 올리고 로고를 캐시 목록에 추가
 - 브랜딩: 운영사 **붐비다 (BUMBIDA)** 표기 — 로그인/회원가입 워드마크 아래 `by 붐비다`, 연결 화면 `붐비다 자동화 스튜디오`·`Powered by 붐비다`, 설정·요금제 하단 `ThreadPilot 운영 · 붐비다 (BUMBIDA)` 푸터 (사업자번호·연락처는 임의로 넣지 않음)
 
 ---
@@ -65,9 +66,8 @@ threads-auto/
 ├── app.js          # 상태·라우터·화면·시트·타이머
 ├── manifest.json   # PWA 설정
 ├── sw.js           # 오프라인 캐시
-├── icons/          # 앱 아이콘
+├── icons/          # 앱 아이콘 · 붐비다 로고(bumbida-logo.svg)
 ├── fonts/          # Pretendard (로컬 번들, 오프라인에서도 동일한 글꼴)
-├── PLAN.md         # 데이터 구조·실서비스화 계획(메타 앱 심사·API 한도 포함)
 └── README.md
 ```
 
@@ -76,7 +76,7 @@ threads-auto/
 ## 기술 메모
 
 - 화면: 해시 라우터(`#/login`, `#/signup`, `#/connect`, `#/home`, `#/drafts`, `#/calendar`, `#/log`, `#/settings`, `#/replies`, `#/pricing`)
-- 상태: `localStorage['threadpilot.state.v1']` (스키마는 `PLAN.md` 3장)
+- 상태: `localStorage['threadpilot.state.v1']`
 - 인증: `localStorage['threadpilot.auth.v1']` — `users[]`(salt + SHA-256 해시) + `session`.
   세션이 없으면 해시로 다른 화면을 열어도 로그인 화면으로 돌아갑니다. 데모 인증이며 **실제 서버·이메일 발송·OAuth는 없습니다**.
   실서비스에서는 이메일 인증 · bcrypt/argon2 해시 · OAuth · 서버 세션 토큰이 필요합니다(PLAN.md 7.10).

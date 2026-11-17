@@ -1,5 +1,5 @@
 /* ThreadPilot 서비스 워커 — 앱 셸 캐시 (오프라인에서도 화면이 열립니다) */
-const CACHE = 'threadpilot-v3';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
+const CACHE = 'threadpilot-v4';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
 const ASSETS = [
   './',
   './index.html',
@@ -8,7 +8,8 @@ const ASSETS = [
   './manifest.json',
   './fonts/PretendardVariable.woff2',
   './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-512.png',
+  './icons/bumbida-logo.svg'
 ];
 
 self.addEventListener('install', event => {
