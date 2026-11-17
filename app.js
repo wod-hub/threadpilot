@@ -1829,7 +1829,7 @@
 
   function adminStatusPill(r) {
     if (r.status === 'canceled') return '<span class="pill err">해지</span>';
-    if (r.status === 'paused') return '<span class="pill off">일시정지</span>';
+    if (r.status === 'paused' || !r.auto) return '<span class="pill off">발행 정지</span>';
     if (r.connectionStatus === 'none') return '<span class="pill off">미연결</span>';
     if (r.connectionStatus === 'needs_reauth') return '<span class="pill err">재연결</span>';
     return '<span class="pill done">정상</span>';
@@ -1880,7 +1880,7 @@
     }).join('');
     openSheet('<h3>요금제 변경</h3><p class="sh-sub">' + esc(r.name) + ' · ' + esc(r.handle) + '</p>' +
       '<div class="sheet-body">' + opts +
-      '<p class="fine" style="margin-top:10px">서버 DB의 요금제가 바로 바뀌고 감사 로그에 남 습니다. 결제 없이 운영 조치로 처리됩니다.</p></div>' +
+      '<p class="fine" style="margin-top:10px">서버 DB의 요금제가 바로 바뀌고 감사 로그에 남습니다. 결제 없이 운영 조치로 처리됩니다.</p></div>' +
       '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
   }
 
