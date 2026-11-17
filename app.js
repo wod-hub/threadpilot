@@ -950,13 +950,25 @@
     return state.queue.some(q => Math.abs(q.at - at) < MIN);
   }
 
+  /** 계정이 실제로 발행 가능한 상태인지 — 필요하면 연결/재연결 화면으로 보냅니다. */
+  function connectionReady() {
+    const acc = activeAccount();
+    if (!acc) {
+      toast('Threads 계정을 먼저 연결해 주세요', '연결 화면으로 이동합니다', 'warn');
+      setTimeout(() => go('connect'), 350);
+      return false;
+    }
+    if (acc.needsReauth) {
+      toast('Threads 연결을 다시 해 주세요', acc.handle + ' · 설정에서 다시 연결', 'warn');
+      setTimeout(() => go('connect'), 350);
+      return false;
+    }
+    return true;
+  }
+
   /** 서버가 규칙·기존 예약을 반영해 고른 빈 슬롯을 실제 예약으로 채운다. */
   async function fillWeek() {
-    if (!state.active) {
-      toast('Threads 계정을 먼저 연결해 주세요', '연결 화면으로 이동합니다', 'warn');
-      go('connect');
-      return;
-    }
+    if (!connectionReady()) return;
     const s = state.settings;
     const n = Math.min(12, Math.max(3, s.perDay * 3));
     let slots = [];
@@ -1097,11 +1109,7 @@
   async function openScheduleSheet(draftId) {
     const d = state.drafts.find(x => x.id === draftId);
     if (!d) return;
-    if (!state.active) {
-      toast('Threads 계정을 먼저 연결해 주세요', '연결 화면으로 이동합니다', 'warn');
-      go('connect');
-      return;
-    }
+    if (!connectionReady()) return;
     pendingDraft = draftId;
     let slots = [];
     try {
@@ -1505,7 +1513,7 @@
             '<span class="tl-time">' + hhmm(q.at) + '</span>' +
             '<div class="tl-body"><div class="tl-text">' + esc(excerpt(q.text, 40)) + '</div>' +
             '<div class="tl-meta">' + esc(q.topic) + ' · ' + (TONE_LABEL[q.tone] || '') + (q.formality ? ' · ' + FORMALITY_LABEL[q.formality] : '') + '</div></div>' +
-            '<span class="pill ' + (q.status === 'published' ? 'done' : 'wait') + '">' + (q.status === 'published' ? '발행됨' : '대기') + '</span></div>').join('') + '</div>'
+            '<span class="pill ' + (q.status === 'published' ? 'done' : q.status === 'failed' || q.status === 'unknown' ? 'err' : 'wait') + '">' + (q.status === 'published' ? '발행됨' : q.status === 'failed' ? '실패' : q.status === 'unknown' ? '확인 필요' : '대기') + '</span></div>').join('') + '</div>'
         : '<div class="card"><p class="small">오늘 예약된 글이 없어요.</p></div>') +
 
       '<h2>최근 알림<span class="link" data-act="nav" data-to="log" style="cursor:pointer">전체 보기</span></h2>' +
@@ -2201,6 +2209,15 @@
   }
 
   function render() {
+    if (booting) {
+      const sc0 = $('#screen');
+      if (sc0) sc0.innerHTML = '<div class="onboard" style="min-height:64vh;justify-content:center;align-items:center;text-align:center">' +
+        '<div class="mark-lg">' + markSvg(26) + '</div><p class="lead" style="margin-top:16px">불러오는 중…</p></div>';
+      renderTopbar('connect');
+      renderTabbar('connect');
+      syncClock();
+      return;
+    }
     const view = currentView();
     if (view === 'log') { state.seenLog = Date.now(); save(); }
     renderTopbar(view);
@@ -2574,9 +2591,11 @@
   }
 
   /* ---------------------------------------------------------------- 부팅 */
+  let booting = true;
+
   async function boot() {
     readConnectResult();
-    render();          // 로그인/마지막 화면을 먼저 그려 흰 화면을 줄입니다
+    render();          // 세션 확인 전에는 스플래시만 보여 로그인 화면이 깜빡이지 않게 합니다
     fitDevice();
     try {
       const profile = await loadMe();
@@ -2589,6 +2608,7 @@
     } catch (e) {
       if (e.status !== 401) state.lastError = errText(e);
     }
+    booting = false;
     if (!location.hash || location.hash === '#' || location.hash === '#/login' && isLoggedIn()) {
       location.hash = '#/' + (isLoggedIn() ? (state.onboarded ? 'home' : 'connect') : 'login');
     }
