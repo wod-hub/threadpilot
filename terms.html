@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>이용약관 — ThreadPilot</title>
+<meta name="theme-color" content="#ffffff" />
+<meta name="description" content="ThreadPilot(thread.bumbida.com) 이용약관입니다. 서비스 내용, 요금제와 결제, 청약철회·환불, 발행 실패 책임 범위를 안내합니다." />
+<meta name="author" content="붐비다 (BUMBIDA)" />
+<link rel="canonical" href="https://thread.bumbida.com/terms.html" />
+<meta property="og:title" content="이용약관 — ThreadPilot" />
+<meta property="og:description" content="붐비다(BUMBIDA)가 운영하는 ThreadPilot의 이용약관" />
+<meta property="og:type" content="article" />
+<link rel="icon" type="image/png" href="icons/icon-192.png" />
+<meta name="robots" content="index, follow" />
+<style>
+  @font-face {
+    font-family: "Pretendard";
+    src: url("fonts/PretendardVariable.woff2") format("woff2-variations");
+    font-weight: 45 920;
+    font-style: normal;
+    font-display: swap;
+  }
+  :root {
+    --ink: #0B0B0C;
+    --ink2: #3F3F46;
+    --muted: #70707A;
+    --muted2: #A1A1AA;
+    --line: #ECECF0;
+    --soft: #F6F6F8;
+    --accent: #FF3B5C;
+    --accent-soft: #FFF1F3;
+    --white: #fff;
+    --r: 16px;
+    --wrap: 760px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: #fff;
+    color: var(--ink);
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.75;
+    letter-spacing: -0.011em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  a { color: var(--ink); text-decoration: none; border-bottom: 1px solid #D7D7DE; }
+  a:hover { border-bottom-color: var(--accent); color: var(--accent); }
+  .wrap { width: 100%; max-width: var(--wrap); margin: 0 auto; padding: 0 20px; }
+
+  .site-head {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(255,255,255,.92);
+    backdrop-filter: saturate(180%) blur(12px);
+    border-bottom: 1px solid var(--line);
+  }
+  .site-head .wrap { display: flex; align-items: center; gap: 12px; height: 58px; }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 800; letter-spacing: -0.03em; border: 0; }
+  .brand img { width: 26px; height: 26px; border-radius: 7px; }
+  .brand .op { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .head-nav { margin-left: auto; display: flex; gap: 16px; font-size: 13.5px; color: var(--muted); }
+  .head-nav a { border: 0; color: var(--muted); }
+  .head-nav a:hover { color: var(--accent); }
+  .head-nav a[aria-current="page"] { color: var(--ink); font-weight: 700; }
+
+  .page-head { padding: 44px 0 26px; border-bottom: 1px solid var(--line); }
+  .kicker { display: inline-block; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); background: var(--accent-soft); padding: 5px 10px; border-radius: 999px; }
+  h1 { font-size: 32px; line-height: 1.3; letter-spacing: -0.035em; margin: 14px 0 10px; }
+  .lede { color: var(--ink2); font-size: 16px; margin: 0 0 18px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; color: var(--muted); }
+  .meta b { color: var(--ink2); font-weight: 600; }
+
+  .toc { margin: 28px 0 8px; padding: 18px 20px; background: var(--soft); border-radius: var(--r); }
+  .toc h2 { font-size: 13px; margin: 0 0 10px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .toc ol { margin: 0; padding-left: 18px; columns: 2; column-gap: 24px; font-size: 14px; }
+  .toc li { margin: 3px 0; break-inside: avoid; }
+  .toc a { border: 0; color: var(--ink2); }
+  .toc a:hover { color: var(--accent); }
+
+  main { padding-bottom: 24px; }
+  section { padding: 26px 0; border-bottom: 1px solid var(--line); }
+  section:last-of-type { border-bottom: 0; }
+  h2 { font-size: 21px; line-height: 1.4; letter-spacing: -0.025em; margin: 0 0 14px; scroll-margin-top: 74px; }
+  h2 .num { display: inline-block; min-width: 30px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  h3 { font-size: 16px; margin: 22px 0 8px; letter-spacing: -0.015em; }
+  p { margin: 0 0 12px; color: var(--ink2); }
+  ul, ol { margin: 0 0 12px; padding-left: 20px; color: var(--ink2); }
+  li { margin: 5px 0; }
+  li > ul, li > ol { margin: 6px 0; }
+  strong { color: var(--ink); font-weight: 700; }
+
+  .table-wrap { overflow-x: auto; margin: 14px 0 16px; border: 1px solid var(--line); border-radius: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 520px; }
+  th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+  th { background: #FAFAFB; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td { color: var(--ink2); }
+  td.num-cell { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  .callout { margin: 16px 0; padding: 16px 18px; border-radius: 12px; background: var(--accent-soft); border: 1px solid #FFE0E5; color: #7A1226; font-size: 14.5px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .note { font-size: 13.5px; color: var(--muted); }
+
+  footer { margin-top: 8px; border-top: 1px solid var(--line); background: #FAFAFB; padding: 30px 0 40px; font-size: 13px; color: var(--muted); }
+  footer p { margin: 0 0 6px; color: var(--muted); }
+  .foot-brand { font-size: 15px; font-weight: 800; color: var(--ink); letter-spacing: -0.02em; margin-bottom: 8px; }
+  .foot-nav { display: flex; flex-wrap: wrap; gap: 14px; margin: 14px 0 12px; }
+  .foot-nav a { border: 0; color: var(--ink2); font-weight: 600; }
+  .foot-nav a:hover { color: var(--accent); }
+  .copy { margin-top: 14px; font-size: 12px; color: var(--muted2); }
+
+  @media (max-width: 640px) {
+    body { font-size: 15.5px; }
+    h1 { font-size: 26px; }
+    h2 { font-size: 19px; }
+    .toc ol { columns: 1; }
+    .page-head { padding: 32px 0 22px; }
+    .head-nav { gap: 12px; font-size: 12.5px; }
+    .brand .op { display: none; }
+    th, td { padding: 10px 12px; }
+  }
+  @media print {
+    .site-head, .toc, .foot-nav { display: none; }
+    body { font-size: 11pt; }
+    section { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="./index.html">
+      <img src="icons/bumbida-logo.svg" alt="" />
+      ThreadPilot <span class="op">by 붐비다</span>
+    </a>
+    <nav class="head-nav" aria-label="정책 문서">
+      <a href="./privacy.html">개인정보</a>
+      <a href="./terms.html" aria-current="page">이용약관</a>
+      <a href="./data-deletion.html">데이터 삭제</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="page-head">
+    <span class="kicker">Terms of Service</span>
+    <h1>이용약관</h1>
+    <p class="lede">이 약관은 붐비다(BUMBIDA)가 제공하는 ThreadPilot의 이용 조건과 절차, 회원과 운영사의 권리·의무를 정합니다. 회원가입 또는 서비스 이용으로 이 약관에 동의한 것으로 봅니다.</p>
+    <div class="meta">
+      <span><b>운영사</b> 붐비다 (BUMBIDA)</span>
+      <span><b>대표</b> 한동엽</span>
+      <span><b>문의</b> <a href="mailto:zilzil772@gmail.com">zilzil772@gmail.com</a></span>
+      <span><b>시행일</b> 2026년 11월 18일</span>
+      <span><b>버전</b> v1.0</span>
+    </div>
+  </div>
+
+  <nav class="toc" aria-label="목차">
+    <h2>목차</h2>
+    <ol>
+      <li><a href="#t1">목적과 적용</a></li>
+      <li><a href="#t2">정의</a></li>
+      <li><a href="#t3">약관의 효력과 변경</a></li>
+      <li><a href="#t4">회원가입과 계정 관리</a></li>
+      <li><a href="#t5">서비스의 내용</a></li>
+      <li><a href="#t6">Threads 계정 연결</a></li>
+      <li><a href="#t7">요금제·결제·청약철회·환불</a></li>
+      <li><a href="#t8">이용 제한</a></li>
+      <li><a href="#t9">서비스의 변경·중단</a></li>
+      <li><a href="#t10">발행 결과와 책임 범위</a></li>
+      <li><a href="#t11">게시물과 지식재산권</a></li>
+      <li><a href="#t12">AI 생성 콘텐츠</a></li>
+      <li><a href="#t13">개인정보 보호</a></li>
+      <li><a href="#t14">이용계약 해지와 데이터 삭제</a></li>
+      <li><a href="#t15">손해배상과 면책</a></li>
+      <li><a href="#t16">준거법과 분쟁 해결</a></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section id="t1">
+      <h2><span class="num">1.</span>목적과 적용</h2>
+      <p>이 약관은 붐비다(이하 "운영사")가 운영하는 ThreadPilot(이하 "서비스")의 이용에 관한 조건과 절차, 운영사와 회원의 권리·의무 및 책임 사항을 정하는 것을 목적으로 합니다.</p>
+      <p>이 약관은 서비스 화면에 게시하거나 기타의 방법으로 회원에게 공지함으로써 효력이 발생합니다. 이 약관에서 정하지 않은 사항은 「전자상거래 등에서의 소비자보호에 관한 법률」, 「약관의 규제에 관한 법률」, 「개인정보 보호법」 등 관련 법령과 서비스 화면의 안내에 따릅니다.</p>
+    </section>
+
+    <section id="t2">
+      <h2><span class="num">2.</span>정의</h2>
+      <ul>
+        <li><strong>서비스</strong> — 회원이 연결한 Threads 계정에 대해 AI 초안 생성, 예약·자동 발행, 댓글 수집과 자동 답글, 발행 결과 확인 기능을 제공하는 웹 애플리케이션을 말합니다.</li>
+        <li><strong>회원</strong> — 이 약관에 동의하고 서비스에 가입하여 계정을 가진 자를 말합니다.</li>
+        <li><strong>계정 연결</strong> — 회원이 Meta의 Threads OAuth를 통해 자신의 Threads 계정 사용 권한을 서비스에 부여한 상태를 말합니다.</li>
+        <li><strong>콘텐츠</strong> — 회원이 입력하거나 서비스가 생성한 발행 문구, 예약 정보, 답글 문구를 말합니다.</li>
+        <li><strong>슬롯</strong> — 회원이 정한 발행 시각(예: 08:00, 12:30, 19:00)을 말합니다.</li>
+        <li><strong>요금제</strong> — 무료 체험, 스탠다드, 프로, 에이전시 등 서비스 이용 범위와 요금을 정한 단위를 말합니다.</li>
+      </ul>
+    </section>
+
+    <section id="t3">
+      <h2><span class="num">3.</span>약관의 효력과 변경</h2>
+      <p>운영사는 관련 법령을 위반하지 않는 범위에서 이 약관을 변경할 수 있습니다. 약관을 변경할 때에는 적용일자와 변경 사유를 명시하여 적용일자 <strong>7일 전</strong>부터 서비스 화면 또는 이 페이지에 공지합니다. 회원에게 불리한 중요한 변경(요금 인상, 책임 범위 축소 등)은 <strong>30일 전</strong>에 공지하며, 필요한 경우 서비스 내 알림 또는 이메일로 알립니다.</p>
+      <p>회원이 변경된 약관의 적용일 이후에도 서비스를 계속 이용하는 경우 변경된 약관에 동의한 것으로 봅니다. 변경된 약관에 동의하지 않는 회원은 이용계약을 해지할 수 있습니다.</p>
+    </section>
+
+    <section id="t4">
+      <h2><span class="num">4.</span>회원가입과 계정 관리</h2>
+      <ul>
+        <li>회원가입은 만 14세 이상이어야 하며, 이메일 주소와 비밀번호를 입력하고 이 약관과 <a href="./privacy.html">개인정보처리방침</a>에 동의함으로써 신청합니다.</li>
+        <li>운영사는 다음의 경우 가입 신청을 승낙하지 않거나 사후에 해지할 수 있습니다: 타인의 정보를 도용한 경우, 서비스를 자동화 남용·스팸·불법 행위에 사용하려는 경우, 과거에 이용 제한을 받은 경우.</li>
+        <li>회원은 자신의 계정과 비밀번호를 안전하게 관리할 책임이 있습니다. 계정이 제3자에 의해 사용된 사실을 알게 된 경우 즉시 운영사에 알리고, 운영사의 안내에 따라야 합니다.</li>
+        <li>회원은 자신의 이메일·업체 정보를 정확하게 유지해야 하며, 운영사는 서비스 제공에 필요한 안내를 등록된 이메일로 보냅니다.</li>
+      </ul>
+    </section>
+
+    <section id="t5">
+      <h2><span class="num">5.</span>서비스의 내용</h2>
+      <p>운영사는 회원에게 다음 기능을 제공합니다.</p>
+      <ol>
+        <li><strong>AI 초안 생성</strong> — 회원이 정한 주제·말투·톤·금지어를 바탕으로 발행 문구 초안을 제안합니다.</li>
+        <li><strong>예약·자동 발행</strong> — 회원이 승인한 문구를 정한 시각에 Threads 계정으로 발행합니다.</li>
+        <li><strong>댓글 수집·자동 답글</strong> — 회원이 발행한 글의 댓글을 확인하고, 설정에 따라 자동으로 답글을 작성합니다. 민감한 표현이 포함된 댓글은 자동 답글 대신 회원에게 알립니다.</li>
+        <li><strong>기록·알림</strong> — 발행·답글 결과와 실패 사유를 로그로 보여주고, 실패 시 알립니다.</li>
+        <li><strong>운영자 콘솔</strong> — 운영사가 고객 계정의 상태와 발행 현황을 관리하기 위한 내부 기능입니다.</li>
+      </ol>
+      <p>서비스는 Meta의 Threads API를 사용합니다. Meta의 정책·API 변경, 권한 심사 결과, 플랫폼 장애에 따라 일부 기능이 제한되거나 일시 중단될 수 있으며, 운영사는 그 사실을 회원에게 안내합니다.</p>
+    </section>
+
+    <section id="t6">
+      <h2><span class="num">6.</span>Threads 계정 연결</h2>
+      <ul>
+        <li>계정 연결은 Meta의 OAuth 인증 화면에서 <strong>회원 본인이 직접</strong> 진행합니다. 운영사는 회원의 Threads(메타) 계정 <strong>비밀번호를 수집하거나 요구하지 않습니다.</strong></li>
+        <li>서비스는 발행과 답글에 필요한 권한(기본 정보, 콘텐츠 게시, 댓글 읽기, 답글 관리)만 요청합니다.</li>
+        <li>연결 시 발급되는 액세스 토큰은 암호화하여 저장되며, 회원은 언제든지 서비스 설정 또는 Threads 설정에서 권한을 철회할 수 있습니다. 철회 시 서비스는 토큰을 폐기하고 발행을 중단합니다.</li>
+        <li>Threads의 공개 프로필 여부에 따라 일정 기간(90일)마다 재동의가 필요할 수 있으며, 토큰 유효기간(60일) 만료 전에 운영사는 자동 갱신을 시도하고 실패 시 재연결을 안내합니다.</li>
+        <li>회원은 자신이 권한을 가진 계정만 연결해야 하며, 타인의 계정을 연결하여 사용해서는 안 됩니다.</li>
+      </ul>
+   </section>
+
+    <section id="t7">
+      <h2><span class="num">7.</span>요금제·결제·청약철회·환불</h2>
+      <h3>가. 요금제</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>요금제</th><th>월 요금</th><th>연결 가능 계정 수</th><th>비고</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>무료 체험</td><td class="num-cell">0원</td><td>1개</td><td>가입일로부터 14일</td></tr>
+            <tr><td>스탠다드</td><td class="num-cell">49,000원</td><td>1개</td><td>월 구독</td></tr>
+            <tr><td>프로</td><td class="num-cell">99,000원</td><td>3개</td><td>월 구독</td></tr>
+            <tr><td>에이전시</td><td class="num-cell">290,000원</td><td>10개</td><td>월 구독</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">요금은 결제 화면에 표시된 금액을 기준으로 하며, 부가가치세 등 세금의 처리와 표시는 관련 법령과 결제 화면의 안내에 따릅니다. 운영사가 요금을 인상하는 경우 3항의 절차에 따라 사전에 공지하고, 이미 결제한 이용 기간에는 변경된 요금을 소급 적용하지 않습니다.</p>
+
+      <h3>나. 결제</h3>
+      <ul>
+        <li>유료 요금제는 카드 등록 후 매월 같은 날짜에 자동으로 청구됩니다. 결제는 결제대행사(토스페이먼츠)를 통해 처리되며, 운영사는 카드번호 전체와 CVC를 저장하지 않습니다.</li>
+        <li>무료 체험 기간이 끝나기 전에 유료 요금제로 전환하지 않으면 자동으로 결제되지 않습니다. 체험 기간이 끝나면 발행·답글 기능이 정지되고, 결제 안내가 표시됩니다.</li>
+        <li>청구에 실패하면 운영사는 재청구를 시도하며, 계속 실패하는 경우 서비스 이용을 일시 정지할 수 있습니다. 이 경우 회원은 카드를 다시 등록하여 이용을 재개할 수 있습니다.</li>
+        <li>요금제 변경은 다음 결제 주기부터 적용되는 것을 원칙으로 하며, 계정 수를 줄이는 변경으로 연결 계정이 기준을 넘는 경우 가장 최근에 연결한 계정부터 비활성화됩니다(삭제되지 않음).</li>
+      </ul>
+
+      <h3>다. 청약철회와 환불</h3>
+      <ul>
+        <li>회원은 결제일로부터 <strong>7일 이내</strong>에 청약철회를 요청할 수 있습니다. 이 기간에 서비스를 전혀 사용하지 않은 경우 전액 환불합니다.</li>
+        <li>7일이 지났거나 서비스를 사용한 경우, 잔여 이용 기간에 해당하는 금액에서 이미 제공된 서비스 이용분과 결제 수수료를 공제한 뒤 환불합니다. 사용한 날이 하루라도 있으면 해당 월의 이용분은 공제 대상입니다.</li>
+        <li>월 구독을 해지하면 다음 결제일부터 청구가 중단됩니다. 이미 결제된 이용 기간의 요금은 원칙적으로 환불하지 않으며, 해지 후에도 해당 기간이 끝날 때까지 서비스를 이용할 수 있습니다.</li>
+        <li>운영사의 귀책 사유로 서비스를 이용하지 못한 경우(예: 7일 이상 연속 장애)에는 이용하지 못한 기간에 해당하는 금액을 환불하거나 다음 결제에서 차감합니다.</li>
+        <li>환불 요청은 <a href="mailto:zilzil772@gmail.com">zilzil772@gmail.com</a>으로 접수하며, 운영사는 접수일로부터 3영업일 이내에 처리합니다. 카드 결제 취소는 카드사 정책에 따라 환불 반영에 시간이 걸릴 수 있습니다.</li>
+        <li>관련 법령이 정한 회원의 권리는 이 약관에 의해 제한되지 않습니다.</li>
+      </ul>
+    </section>
+
+    <section id="t8">
+      <h2><span class="num">8.</span>이용 제한</h2>
+      <p>회원은 다음 행위를 해서는 안 됩니다.</p>
+      <ul>
+        <li>법령, 공서양속, Meta 및 Threads의 이용 정책을 위반하는 콘텐츠를 게시하거나 자동화하는 행위</li>
+        <li>스팸성 게시물·댓글·답글을 대량으로 발행하거나, 동일 문구를 반복 발행하는 행위</li>
+        <li>타인의 명예·초상권·지식재산권·개인정보를 침해하는 행위</li>
+        <li>서비스의 한도·요금제 제한을 우회하거나, 자동화 도구로 서버에 과도한 부하를 주는 행위</li>
+        <li>서비스를 역설계·복제하거나, 서비스에서 얻은 정보를 무단으로 제3자에게 판매하는 행위</li>
+        <li>타인의 계정을 도용하거나, 자신이 권한을 갖지 않은 Threads 계정을 연결하는 행위</li>
+      </ul>
+      <p>운영사는 위 행위가 확인되면 사전 통지 후(긴급한 경우 사후 통지) 발행 정지, 계정 정지, 이용계약 해지 등의 조치를 할 수 있습니다. 이 경우 이미 결제한 요금은 환불되지 않을 수 있으며, 위반으로 발생한 손해에 대해 회원이 책임집니다.</p>
+    </section>
+
+    <section id="t9">
+      <h2><span class="num">9.</span>서비스의 변경·중단</h2>
+      <ul>
+        <li>운영사는 서비스의 내용을 개선하거나 변경할 수 있으며, 중요한 변경은 사전에 공지합니다.</li>
+        <li>다음의 경우 서비스의 전부 또는 일부를 일시 중단할 수 있습니다: 서버 점검·교체, 통신 장애, Meta Threads API의 변경·중단, 천재지변·전쟁·정전 등 불가항력, 그 밖에 운영상 상당한 이유가 있는 경우.</li>
+        <li>운영사가 서비스를 영구 종료하는 경우 최소 <strong>30일 전</strong>에 공지하고, 남은 유료 이용 기간에 해당하는 금액을 환불합니다.</li>
+      </ul>
+    </section>
+
+    <section id="t10">
+      <h2><span class="num">10.</span>발행 결과와 책임 범위</h2>
+      <div class="callout">
+        <p>예약 발행은 Meta의 Threads API를 통해 이루어집니다. 플랫폼 정책 변경, API 오류·한도 초과, 계정 권한 만료, 네트워크 장애 등 운영사의 통제를 벗어난 사유로 발행이 지연되거나 누락될 수 있습니다.</p>
+      </div>
+      <ul>
+        <li>운영사는 예약 시각에 발행되도록 합리적인 노력을 다하며, 실패한 경우 로그에 사유를 남기고 재시도 또는 회원 알림을 제공합니다.</li>
+        <li>예약 시각에서 15분 이내의 지연은 정상 범위로 봅니다. 3시간을 초과하여 지연된 예약은 발행하지 않고 건너뛴 뒤 회원에게 알립니다(회원이 원하면 즉시 발행할 수 있습니다).</li>
+        <li>발행된 콘텐츠의 내용, 표현, 사실관계에 대한 최종 책임은 회원에게 있습니다. 운영사는 문구를 대신 검토·보증하지 않습니다.</li>
+        <li>회원의 Threads 계정 정지·제한, 권한 철회, 비밀번호 변경 등 회원 계정 사정으로 발생한 발행 실패에 대해 운영사는 책임지지 않습니다.</li>
+        <li>AI 초안을 그대로 발행하여 발생한 오해·오류에 대해서는 12항의 안내를 따릅니다.</li>
+      </ul>
+    </section>
+
+    <section id="t11">
+      <h2><span class="num">11.</span>게시물과 지식재산권</h2>
+      <ul>
+        <li>회원이 입력한 콘텐츠와 AI 초안을 바탕으로 회원이 확정한 콘텐츠의 권리는 회원에게 있습니다.</li>
+        <li>회원은 운영사가 서비스 제공(저장·전송·발행·백업)에 필요한 범위에서 콘텐츠를 사용하는 것을 허락합니다. 이 허락은 서비스 제공 목적에 한정되며, 운영사는 회원의 콘텐츠를 광고·홍보에 임의로 사용하지 않습니다.</li>
+        <li>서비스의 화면, 소프트웨어, 상표, 로고 등 운영사가 만든 요소의 권리는 운영사에게 있습니다.</li>
+      </ul>
+    </section>
+
+    <section id="t12">
+      <h2><span class="num">12.</span>AI 생성 콘텐츠</h2>
+      <ul>
+        <li>서비스는 생성형 AI를 이용해 초안을 제안할 수 있습니다. AI가 만든 문장은 사실과 다르거나, 의도와 다르게 표현될 수 있습니다.</li>
+        <li>회원은 발행 전에 문구를 확인하고 필요한 수정을 해야 하며, 발행 여부와 내용을 최종 결정합니다.</li>
+        <li>운영사는 AI가 생성한 글임을 알 수 있도록 표시하는 기능을 제공할 수 있으며(예: Threads의 AI 생성 표시), 표시 여부는 서비스 화면의 설정을 따릅니다.</li>
+        <li>AI 초안은 회원의 주제·말투·금지어 설정을 반영하지만, 금지어 필터를 통과한 문장이라도 모든 상황에서 적절함을 보증하지는 않습니다.</li>
+      </ul>
+    </section>
+
+    <section id="t13">
+      <h2><span class="num">13.</span>개인정보 보호</h2>
+      <p>운영사는 회원의 개인정보를 <a href="./privacy.html">개인정보처리방침</a>에 따라 처리합니다. 개인정보처리방침은 이 약관의 일부를 구성합니다. Threads API를 통해 받은 정보의 처리와 국외 이전에 관한 사항도 개인정보처리방침에 명시되어 있습니다.</p>
+    </section>
+
+    <section id="t14">
+      <h2><span class="num">14.</span>이용계약 해지와 데이터 삭제</h2>
+      <ul>
+        <li>회원은 언제든지 서비스 설정에서 연결 해제 또는 계정 삭제를 요청하여 이용계약을 해지할 수 있습니다.</li>
+        <li>계정을 삭제하면 Threads 액세스 토큰은 즉시 폐기되고, 계정 정보와 발행·댓글 기록은 <strong>30일 이내</strong>에 파기됩니다. 다만 전자상거래법 등에 따라 보존해야 하는 결제·계약 기록은 정해진 기간 동안 보관합니다.</li>
+        <li>운영사는 회원이 이 약관을 위반한 경우 통지 후 이용계약을 해지할 수 있습니다. 다만 긴급한 경우(불법 콘텐츠 대량 발행 등)에는 사후 통지할 수 있습니다.</li>
+        <li>해지 후에도 이미 발행된 Threads 게시물은 회원의 Threads 계정에 남아 있으며, 회원이 직접 삭제해야 합니다.</li>
+        <li>데이터 삭제 절차는 <a href="./data-deletion.html">데이터 삭제 요청 안내</a>에서 확인할 수 있습니다.</li>
+      </ul>
+    </section>
+
+    <section id="t15">
+      <h2><span class="num">15.</span>손해배상과 면책</h2>
+      <ul>
+        <li>운영사는 고의 또는 중대한 과실로 회원에게 손해를 입힌 경우 관련 법령에 따라 배상합니다.</li>
+        <li>운영사는 천재지변, Meta 플랫폼의 정책·API 변경, 통신 장애, 회원의 귀책 사유로 인한 손해에 대해 책임지지 않습니다.</li>
+        <li>무료 체험 기간 또는 무료로 제공되는 기능에 대해서는 관련 법령이 허용하는 범위에서 책임이 제한됩니다.</li>
+        <li>운영사의 배상 책임은 해당 손해가 발생한 시점 기준 최근 3개월간 회원이 실제로 지급한 이용 요금을 한도로 합니다. 다만 운영사의 고의·중대한 과실 또는 생명·신체에 대한 손해에는 이 제한을 적용하지 않습니다.</li>
+      </ul>
+    </section>
+
+    <section id="t16">
+      <h2><span class="num">16.</span>준거법과 분쟁 해결</h2>
+      <p>이 약관은 대한민국 법률에 따라 해석되고 적용됩니다. 운영사와 회원 간 분쟁이 발생한 경우 상호 협의로 해결하며, 협의가 이루어지지 않으면 민사소송법에 따른 관할 법원에 제소할 수 있습니다. 회원은 분쟁 해결을 위해 한국소비자원, 전자거래분쟁조정위원회 등에 조정을 신청할 수 있습니다.</p>
+      <p><strong>부칙</strong> — 이 약관은 2026년 11월 18일부터 시행합니다.</p>
+    </section>
+
+  </main>
+</div>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-brand">붐비다 (BUMBIDA)</div>
+    <p>ThreadPilot — 스레드 예약 발행 및 자동 답글 서비스</p>
+    <p>대표 한동엽 · 문의 <a href="mailto:zilzil772@gmail.com">zilzil772@gmail.com</a></p>
+    <p class="note">사업자등록번호·사업장 주소·연락 전화번호는 확정 후 이 페이지에 게시합니다.</p>
+    <nav class="foot-nav" aria-label="정책 문서">
+      <a href="./terms.html">이용약관</a>
+      <a href="./privacy.html">개인정보처리방침</a>
+      <a href="./data-deletion.html">데이터 삭제 요청</a>
+      <a href="./index.html">앱으로 돌아가기</a>
+    </nav>
+    <p class="copy">© 2026 붐비다 (BUMBIDA). All rights reserved.</p>
+  </div>
+</footer>
+
+</body>
+</html>
