@@ -728,7 +728,8 @@
     card: '<rect x="3.4" y="5.6" width="17.2" height="12.8" rx="3"/><path d="M3.4 10.2h17.2"/>',
     shield: '<path d="M12 3.6 5.4 6.2v5.4c0 4 2.8 7.2 6.6 8.4 3.8-1.2 6.6-4.4 6.6-8.4V6.2z"/><path d="M9.4 11.9l1.9 1.9 3.4-3.6"/>',
     info: '<circle cx="12" cy="12" r="8.6"/><path d="M12 11v5.2M12 7.9v.2"/>',
-    copy: '<rect x="8.4" y="8.4" width="11.2" height="11.2" rx="2.6"/><path d="M15.6 8.4V6.6a2 2 0 0 0-2-2H6.6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h1.8"/>'
+    copy: '<rect x="8.4" y="8.4" width="11.2" height="11.2" rx="2.6"/><path d="M15.6 8.4V6.6a2 2 0 0 0-2-2H6.6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h1.8"/>',
+    search: '<circle cx="11" cy="11" r="6.4"/><path d="M15.9 15.9 20.2 20.2"/>'
   };
   function icon(name, size, sw) {
     return '<svg width="' + (size || 20) + '" height="' + (size || 20) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="' + (sw || 1.75) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (PATHS[name] || '') + '</svg>';
@@ -885,7 +886,7 @@
     while (root.children.length >= 3) root.removeChild(root.firstChild);
     const el = document.createElement('div');
     el.className = 'toast';
-    el.innerHTML = '<span class="ti ' + (kind === 'ok' ? 'ok' : '') + '">' + icon('check', 13, 2.6) + '</span>' +
+    el.innerHTML = '<span class="ti ' + (kind === 'warn' ? 'warn' : kind === 'ok' ? 'ok' : '') + '">' + icon(kind === 'warn' ? 'info' : 'check', 13, 2.6) + '</span>' +
       '<span class="ttext">' + esc(text) + '</span>' + (sub ? '<span class="ts">' + esc(sub) + '</span>' : '');
     root.appendChild(el);
     void el.offsetWidth;
@@ -1586,10 +1587,287 @@
         '<button class="set-row" data-act="reset"><span class="ic">' + icon('refresh', 16) + '</span>' +
         '<div><div class="lab">데모 데이터 초기화</div><div class="desc">계정 연결·예약·로그를 지우고 처음으로 (로그인 유지)</div></div></button>' +
         '<div class="set-row static"><span class="ic">' + icon('shield', 16) + '</span>' +
-        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 0.9.2 (프로토타입)</div></div></div>' +
+        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 0.9.3 (프로토타입)</div></div></div>' +
       '</div>' +
+
+      '<div class="sec-label">' + esc(OP_LINE) + '</div>' +
+      '<div class="set-card">' +
+        '<button class="set-row" data-act="nav" data-to="admin"><span class="ic">' + opLogo(16) + '</span>' +
+        '<div><div class="lab">붐비다 관리자 콘솔</div><div class="desc">고객 계정 · 자동 발행 상태 관리</div></div>' +
+        '<span class="val"><span class="tag accent">관리자</span></span></button>' +
+        '<div class="set-row static"><span class="ic">' + icon('info', 16) + '</span>' +
+        '<div><div class="lab">데모 · 로컬 시뮬레이션</div><div class="desc">실제 서버 DB 연동 전 화면입니다</div></div></div>' +
+      '</div>' +
+
       '<button class="btn line block" data-act="logout" style="margin-top:16px;color:var(--accent-deep)">' + icon('user', 16) + '로그아웃</button>' +
       '<p class="fine" style="margin-top:12px">' + (me.email ? esc(me.email) + ' 로 로그인됨 · ' : '') + '데모 모드입니다. 실제 스레드 계정에는 게시되지 않습니다.</p>' +
+      operatorFooter() +
+    '</div>';
+  }
+
+  /* ------------------------------------------------------- 뷰: 관리자 콘솔
+     운영자용 화면(#/admin). 실제 서버·DB 연동 전 단계라 고객·발행·오류 값은
+     이 브라우저(localStorage)에서만 도는 로컬 시뮬레이션입니다. 실제 고객
+     데이터로 오해되지 않도록 화면 상단에 '데모 · 로컬 시뮬레이션' 배지를 둡니다.
+     실서비스에서는 운영자 역할 검사 + 서버 API가 필요합니다(PLAN.md 7장).
+  ------------------------------------------------------------------------ */
+  const ADMIN_KEY = 'threadpilot.admin.v1';
+  const ADMIN_PLAN_ORDER = ['trial', 'standard', 'pro', 'agency'];
+  const ADMIN_PLAN_LABEL = { trial: '체험', standard: '스탠다드', pro: '프로', agency: '에이전시' };
+  let admin = seedAdmin();
+  let admFilter = 'all';   // all | ok | paused
+  let admQuery = '';
+
+  // 오늘 안쪽으로 당긴 'n분 전' — 자정 직후에 열어도 오늘 KPI와 로그 날짜가 어긋나지 않게
+  function agoMin(n) {
+    return Math.max(Date.now() - n * MIN, dayStart() + MIN);
+  }
+
+  function seedAdmin() {
+    const log = (id, customerId, kind, mins, text, extra) => Object.assign({
+      id: 'al-' + id, customerId, kind, at: agoMin(mins), text, state: 'ok', retry: null
+    }, extra || {});
+    return {
+      v: 1,
+      customers: [
+        { id: 'cu-sushi', name: '스시 미도', biz: '일식 스시집', handle: '@mido.sushi', plan: 'pro', auto: true, since: '2026-08-21', trialEnds: null, color: '#1F6F5C' },
+        { id: 'cu-beauty', name: '글로우 뷰티랩', biz: '뷰티샵', handle: '@glow.lab', plan: 'standard', auto: true, since: '2026-09-14', trialEnds: null, color: '#C2489B' },
+        { id: 'cu-yoga', name: '한강 요가 스튜디오', biz: '요가원', handle: '@hangang.yoga', plan: 'agency', auto: true, since: '2026-07-03', trialEnds: null, color: '#7A5AF8' },
+        { id: 'cu-cafe', name: '카페 무드', biz: '카페', handle: '@cafe.mood', plan: 'trial', auto: false, since: '2026-11-02', trialEnds: agoMin(2880), color: '#B26A00' },
+        { id: 'cu-crossfit', name: '아이언핏 크로스핏', biz: '크로스핏 박스', handle: '@ironfit.box', plan: 'standard', auto: false, since: '2026-10-05', trialEnds: null, color: '#3B6EF6' }
+      ],
+      logs: [
+        log('1', 'cu-sushi', 'publish', 12, '오늘의 오마카세 — 홋카이도 산 우니 입고 안내'),
+        log('2', 'cu-sushi', 'reply', 18, '@sushi_lover 님 댓글에 답글 — 예약은 DM으로 받습니다'),
+        log('3', 'cu-sushi', 'publish', 46, '금요일 저녁 예약석 2자리 남았습니다'),
+        log('4', 'cu-sushi', 'reply', 52, '@mika.eats 님 댓글에 답글 — 건물 뒤 주차 3대 가능'),
+        log('5', 'cu-beauty', 'publish', 25, '가을 톤다운 컬러 — 11월 예약 오픈'),
+        log('6', 'cu-beauty', 'reply', 33, '@glow_fan 님 댓글에 답글 — 소요 시간 90분입니다'),
+        log('7', 'cu-beauty', 'publish', 74, '속눈썹 연장 신규 고객 20% 안내'),
+        log('8', 'cu-beauty', 'reply', 88, '@dayeon.h 님 댓글에 답글 — 주차 안내'),
+        log('9', 'cu-yoga', 'publish', 21, '겨울 특강 — 초보자 4주 코스 모집'),
+        log('10', 'cu-yoga', 'reply', 29, '@yoga_min 님 댓글에 답글 — 매트 대여 가능합니다'),
+        log('11', 'cu-yoga', 'publish', 96, '오전 7시 클래스 신설 — 출근 전 50분'),
+        log('12', 'cu-cafe', 'system', 61, '무료 체험 종료(D-0) — 자동 발행이 멈췄습니다', { state: 'paused' }),
+        log('13', 'cu-cafe', 'error', 62, '스레드 API 401 — 액세스 토큰 만료로 마지막 발행 실패', { state: 'error' }),
+        log('14', 'cu-crossfit', 'error', 40, '스레드 API 429 — 발행 한도 초과 (다음 슬롯에 재시도 대기)', { state: 'waiting', retry: 'waiting' }),
+        log('15', 'cu-crossfit', 'publish', 120, '오늘 19시 클래스 — 스쿼트 자세 교정'),
+        log('16', 'cu-crossfit', 'system', 70, '고객 요청으로 자동 발행 일시정지', { state: 'paused' })
+      ],
+      seq: 0
+    };
+  }
+
+  function loadAdmin() {
+    try {
+      const raw = localStorage.getItem(ADMIN_KEY);
+      const p = raw ? JSON.parse(raw) : null;
+      if (p && p.v === 1 && Array.isArray(p.customers) && Array.isArray(p.logs)) { admin = p; return; }
+      admin = seedAdmin();
+      saveAdmin();
+    } catch (e) { admin = seedAdmin(); }
+  }
+  function saveAdmin() {
+    try { localStorage.setItem(ADMIN_KEY, JSON.stringify(admin)); } catch (e) { /* ignore */ }
+  }
+  function adminLog(customerId, kind, text, state, retry) {
+    admin.logs.push({ id: uid('al-'), customerId, kind, at: Date.now(), text, state: state || 'ok', retry: retry || null });
+    if (admin.logs.length > 240) admin.logs = admin.logs.slice(-240);
+  }
+
+  // 데모 고객 목록 + 지금 로그인한 데모 계정을 같은 모양으로 정리
+  function adminRows() {
+    const t0 = dayStart();
+    const rows = admin.customers.map(c => {
+      const logs = admin.logs.filter(l => l.customerId === c.id);
+      let status = c.auto ? 'active' : 'paused';
+      if (c.plan === 'trial' && c.trialEnds && c.trialEnds <= Date.now()) status = 'expired';
+      return Object.assign({}, c, {
+        posts: logs.filter(l => l.kind === 'publish' && l.at >= t0).length,
+        replies: logs.filter(l => l.kind === 'reply' && l.at >= t0).length,
+        status, me: false
+      });
+    });
+    if (isLoggedIn()) {
+      const u = sessionUser() || {};
+      const acc = activeAccount();
+      const on = !!state.settings.autoPublish;
+      rows.unshift({
+        id: 'me', me: true,
+        name: acc ? acc.name : (u.name || '내 계정'),
+        biz: '내 데모 계정',
+        handle: acc ? acc.handle : (u.email || ''),
+        plan: state.plan, auto: on, color: acc ? acc.color : '#FF3B5C',
+        status: on ? 'active' : 'paused', trialEnds: null,
+        posts: state.logs.filter(l => l.type === 'publish' && l.at >= t0).length,
+        replies: state.logs.filter(l => l.type === 'reply' && l.at >= t0).length
+      });
+    }
+    return rows;
+  }
+
+  function adminStatusPill(r) {
+    if (r.status === 'expired') return '<span class="pill err">체험만료</span>';
+    if (r.status === 'paused') return '<span class="pill off">일시정지</span>';
+    return '<span class="pill done">정상</span>';
+  }
+
+  // 관리자 콘솔 로그 = 데모 고객 로그 + 내 계정 로그(앱에서 실제로 쌓인 기록)
+  function adminLogRows(rows) {
+    rows = rows || adminRows();
+    const byId = {};
+    rows.forEach(r => { byId[r.id] = r; });
+    const q = admQuery.trim().toLowerCase();
+    const t0 = dayStart();
+    const list = admin.logs.filter(l => l.at >= t0).map(l => {
+      const c = byId[l.customerId] || null;
+      return {
+        id: l.id, at: l.at, kind: l.kind, text: l.text, retry: l.retry,
+        custName: c ? c.name : '고객', custStatus: c ? c.status : 'active'
+      };
+    });
+    if (isLoggedIn()) {
+      const me = byId['me'];
+      state.logs.forEach(l => {
+        if (l.type !== 'publish' && l.type !== 'reply') return;
+        if (l.at < t0) return;
+        list.push({
+          id: 'me-' + l.id, at: l.at, kind: l.type, text: l.text, retry: null,
+          custName: me ? me.name : '내 계정', custStatus: me ? me.status : 'active'
+        });
+      });
+    }
+    return list.filter(l => {
+      if (admFilter === 'ok' && l.custStatus !== 'active') return false;
+      if (admFilter === 'paused' && l.custStatus !== 'paused') return false;
+      if (!q) return true;
+      return ((l.text || '') + ' ' + l.custName).toLowerCase().indexOf(q) !== -1;
+    }).sort((a, b) => b.at - a.at).slice(0, 30);
+  }
+
+  function openAdminPlanSheet(id) {
+    if (id === 'me') { go('pricing'); return; }
+    const r = adminRows().find(x => x.id === id);
+    if (!r) return;
+    const opts = ADMIN_PLAN_ORDER.map(p => {
+      const pl = PLANS[p];
+      return '<button class="adm-plan-opt' + (r.plan === p ? ' on' : '') + '" data-act="adm-plan-pick" data-id="' + r.id + '" data-plan="' + p + '">' +
+        '<span class="apo-t"><b>' + ADMIN_PLAN_LABEL[p] + '</b><span>' + (pl.price ? '월 ' + won(pl.price) + '원' : '14일 무료 체험') + '</span></span>' +
+        (r.plan === p ? '<span class="apo-on">' + icon('check', 15, 2.4) + '</span>' : '') + '</button>';
+    }).join('');
+    openSheet('<h3>요금제 변경</h3><p class="sh-sub">' + esc(r.name) + ' · ' + esc(r.handle) + '</p>' +
+      '<div class="sheet-body">' + opts +
+      '<p class="fine" style="margin-top:10px">데모입니다. 결제 없이 이 기기의 상태만 바뀝니다.</p></div>' +
+      '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
+  }
+
+  function openAdminLogSheet(id) {
+    const r = adminRows().find(x => x.id === id);
+    if (!r) return;
+    let items;
+    if (id === 'me') {
+      items = state.logs.filter(l => l.type === 'publish' || l.type === 'reply')
+        .map(l => ({ at: l.at, kind: l.type, text: l.text, retry: null }));
+    } else {
+      items = admin.logs.filter(l => l.customerId === id)
+        .map(l => ({ at: l.at, kind: l.kind, text: l.text, retry: l.retry }));
+    }
+    items.sort((a, b) => b.at - a.at);
+    const body = items.length ? items.slice(0, 40).map(l =>
+      '<div class="adm-sheet-log"><span class="adm-log-t">' + (l.at >= dayStart() ? '오늘 ' : '') + hhmm(l.at) + '</span>' +
+      (l.retry === 'done' ? '<span class="pill done">재시도 완료</span>' : l.retry === 'waiting' ? '<span class="pill err">재시도 대기</span>' : l.kind === 'error' ? '<span class="pill err">오류</span>' : '') +
+      '<p>' + esc(l.text) + '</p></div>').join('') : '<p class="small">아직 기록이 없어요.</p>';
+    openSheet('<h3>' + esc(r.name) + '</h3>' +
+      '<p class="sh-sub">' + esc(r.handle) + ' · ' + ADMIN_PLAN_LABEL[r.plan] + ' · 오늘 글 ' + r.posts + ' / 답글 ' + r.replies + '</p>' +
+      '<div class="sheet-body">' + body + '</div>' +
+      '<div class="sheet-actions">' +
+      (r.me ? '' : '<button class="btn line" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>') +
+      '<button class="btn dark" data-act="close-sheet">닫기</button></div>');
+  }
+
+  function viewAdmin() {
+    const rows = adminRows();
+    const q = admQuery.trim().toLowerCase();
+    const hit = r => !q || (r.name + ' ' + r.biz + ' ' + r.handle).toLowerCase().indexOf(q) !== -1;
+    const shown = rows.filter(r => hit(r) && (admFilter === 'all' ||
+      (admFilter === 'ok' ? r.status === 'active' : r.status === 'paused')));
+    const activeCount = rows.filter(r => r.status === 'active').length;
+    const mrr = rows.reduce((sum, r) => sum + (r.status === 'active' ? ((PLANS[r.plan] || {}).price || 0) : 0), 0);
+    const posts = rows.reduce((sum, r) => sum + r.posts, 0);
+    const replies = rows.reduce((sum, r) => sum + r.replies, 0);
+    const waiting = admin.logs.filter(l => l.retry === 'waiting').length;
+    const filters = [['all', '전체'], ['ok', '정상'], ['paused', '일시정지']];
+
+    const kpi = (label, v, unit, sub, cls) =>
+      '<div class="adm-kpi' + (cls ? ' ' + cls : '') + '"><div class="k">' + label + '</div>' +
+      '<div class="v">' + v + (unit ? '<span>' + unit + '</span>' : '') + '</div><div class="s">' + sub + '</div></div>';
+
+    const cards = shown.map(r => {
+      const pl = PLANS[r.plan] || PLANS.trial;
+      const sw = '<span class="adm-sw ' + (r.auto ? 'on' : '') + '"><i></i></span>';
+      const toggle = r.status === 'expired'
+        ? ''
+        : r.me
+          ? '<button class="adm-act" data-act="adm-toggle-me" aria-label="자동 발행 일시정지/재개">' + sw + (r.auto ? '일시정지' : '재개') + '</button>'
+          : '<button class="adm-act" data-act="adm-toggle" data-id="' + r.id + '" aria-label="자동 발행 일시정지/재개">' + sw + (r.auto ? '일시정지' : '재개') + '</button>';
+      const planBtn = r.me
+        ? '<button class="adm-act" data-act="nav" data-to="pricing">요금제</button>'
+        : '<button class="adm-act" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>';
+      return '<div class="adm-card">' +
+        '<div class="adm-head">' +
+          '<span class="avatar" style="background:' + esc(r.color || '#111114') + ';width:32px;height:32px;font-size:12.5px">' + esc((r.name || '?').slice(0, 1)) + '</span>' +
+          '<div class="adm-id"><div class="adm-name">' + esc(r.name) + (r.me ? '<span class="tag accent">현재 계정</span>' : '') + '</div>' +
+          '<div class="adm-sub2">' + esc(r.biz) + ' · ' + esc(r.handle) + '</div></div>' +
+          adminStatusPill(r) +
+        '</div>' +
+        '<div class="adm-meta">' +
+          '<span class="tag ' + (r.plan === 'trial' ? 'line' : 'accent') + '">' + ADMIN_PLAN_LABEL[r.plan] + (pl.price ? ' · ' + (pl.price / 10000) + '만' : ' · 무료') + '</span>' +
+          '<span class="adm-cnt">오늘 글 <b>' + r.posts + '</b> · 답글 <b>' + r.replies + '</b></span>' +
+        '</div>' +
+        '<div class="adm-acts">' + toggle + planBtn +
+          '<button class="adm-act" data-act="adm-logs" data-id="' + r.id + '">로그 보기</button></div>' +
+      '</div>';
+    }).join('');
+
+    const logItems = adminLogRows(rows);
+    const logHtml = logItems.length ? logItems.map(l => {
+      const ic = l.kind === 'publish' ? 'pub' : l.kind === 'reply' ? 'rep' : 'sys';
+      const icName = l.kind === 'publish' ? 'send' : l.kind === 'reply' ? 'chat' : 'refresh';
+      const pill = l.retry === 'done' ? '<span class="pill done">재시도 완료</span>'
+        : l.retry === 'waiting' ? '<span class="pill err">재시도 대기</span>'
+          : l.kind === 'error' ? '<span class="pill err">오류</span>'
+            : l.kind === 'system' ? '<span class="pill off">상태 변경</span>'
+              : '<span class="pill done">정상</span>';
+      return '<div class="adm-log"><span class="log-ic ' + ic + '">' + icon(icName, 15) + '</span>' +
+        '<div class="adm-log-main"><div class="adm-log-top"><b>' + esc(l.custName) + '</b>' +
+        '<span class="adm-log-t">' + hhmm(l.at) + '</span>' + pill + '</div>' +
+        '<div class="adm-log-text">' + esc(l.text) + '</div>' +
+        (l.retry === 'waiting' ? '<button class="log-open" data-act="adm-retry" data-id="' + l.id + '">지금 재시도</button>' : '') +
+        '</div></div>';
+    }).join('') : '<p class="small">조건에 맞는 로그가 없어요.</p>';
+
+    return '<div class="page adm">' +
+      '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="' + (isLoggedIn() ? 'settings' : 'login') + '" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
+      '<span class="adm-badge">데모 · 로컬 시뮬레이션</span></div>' +
+      '<h1>붐비다 관리자 콘솔<span class="sub">고객 계정과 자동 발행 상태를 한 화면에서 관리합니다</span></h1>' +
+      '<div class="adm-note"><b>데모 · 로컬 시뮬레이션</b> — 실제 서버 DB 연동 전 화면입니다. 고객·발행·오류 값은 이 기기 브라우저(localStorage)에만 저장되고, 실제 스레드 계정이나 붐비다 서버와 연결되지 않습니다.</div>' +
+      '<div class="adm-kpis">' +
+        kpi('활성 고객', activeCount, '곳', '전체 ' + rows.length + '곳 중') +
+        kpi('이번 달 구독(MRR)', (mrr / 10000).toFixed(1), '만원', '정상 고객 월 합계') +
+        kpi('오늘 전체 발행', posts, '건', '답글 ' + replies + '건 별도') +
+        kpi('오류 · 재시도 대기', waiting, '건', waiting ? '재시도 필요' : '오류 없음', waiting ? 'alert' : '') +
+      '</div>' +
+      '<div class="adm-bar">' +
+        '<div class="adm-search">' + icon('search', 16) +
+        '<input class="input" id="adm-q" type="search" value="' + esc(admQuery) + '" placeholder="고객 · 핸들 · 로그 검색" autocomplete="off" /></div>' +
+        '<div class="filters adm-filters">' + filters.map(f => '<button class="chip ' + (admFilter === f[0] ? 'on' : '') + '" data-act="adm-filter" data-f="' + f[0] + '">' + f[1] + '</button>').join('') + '</div>' +
+      '</div>' +
+      '<div class="sec-label">고객 계정 <span class="adm-count">' + shown.length + '곳 표시</span></div>' +
+      (cards || '<div class="card flat"><p class="small">조건에 맞는 고객이 없어요.</p></div>') +
+      '<div class="sec-label">최근 발행 · 오류 로그 <span class="adm-count">' + logItems.length + '건</span></div>' +
+      '<div class="card flat adm-logs">' + logHtml + '</div>' +
+      '<button class="btn line block" data-act="adm-reset" style="margin-top:14px">' + icon('refresh', 15) + '시뮬레이션 데이터 초기화</button>' +
+      '<p class="fine" style="margin-top:10px">실서비스에서는 운영자 역할(권한) 검사와 서버 API가 필요합니다. 이 화면은 데모 흐름 확인용입니다.</p>' +
       operatorFooter() +
     '</div>';
   }
@@ -1699,12 +1977,15 @@
     log: viewLog,
     settings: viewSettings,
     replies: viewReplies,
-    pricing: viewPricing
+    pricing: viewPricing,
+    admin: viewAdmin          // 운영자용 관리자 콘솔(데모 · #/admin 직접 접근 가능)
   };
   const AUTH_VIEWS = { login: 1, signup: 1 };
 
   function currentView() {
     const raw = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
+    // 관리자 콘솔은 데모라 로그인 전에도 바로 열립니다(실서비스에서는 운영자 권한 검사 필요).
+    if (raw === 'admin') return 'admin';
     if (!isLoggedIn()) return raw === 'signup' ? 'signup' : 'login';
     if (AUTH_VIEWS[raw]) return state.onboarded ? 'home' : 'connect';
     if (VIEWS[raw]) return raw;
@@ -1714,7 +1995,7 @@
   function renderTopbar(view) {
     const el = $('#topbar');
     if (!el) return;
-    if (view === 'connect' || AUTH_VIEWS[view]) { el.className = 'topbar hidden'; el.innerHTML = ''; return; }
+    if (view === 'connect' || AUTH_VIEWS[view] || view === 'admin') { el.className = 'topbar hidden'; el.innerHTML = ''; return; }
     const a = activeAccount();
     const unread = state.logs.some(l => l.at > (state.seenLog || 0));
     el.className = 'topbar';
@@ -1728,7 +2009,7 @@
   function renderTabbar(view) {
     const el = $('#tabbar');
     if (!el) return;
-    if (view === 'connect' || AUTH_VIEWS[view]) { el.className = 'tabbar hidden'; el.innerHTML = ''; return; }
+    if (view === 'connect' || AUTH_VIEWS[view] || view === 'admin') { el.className = 'tabbar hidden'; el.innerHTML = ''; return; }
     const cur = (view === 'pricing' || view === 'replies') ? 'settings' : view;
     const tabs = [['home', '홈', 'home'], ['drafts', '글쓰기', 'spark'], ['calendar', '예약', 'calendar'], ['log', '로그', 'list'], ['settings', '설정', 'sliders']];
     el.className = 'tabbar';
@@ -1956,6 +2237,64 @@
         toast(p.name + ' 플랜으로 바뀌었어요', p.price ? '월 ' + won(p.price) + '원' : '무료', 'ok');
         break;
       }
+      case 'adm-toggle': {
+        const c = admin.customers.find(x => x.id === el.dataset.id);
+        if (!c) break;
+        const row = adminRows().find(x => x.id === c.id);
+        if (row && row.status === 'expired') {
+          toast('무료 체험이 끝났어요', '요금제를 바꿔 주세요', 'warn');
+          openAdminPlanSheet(c.id);
+          break;
+        }
+        c.auto = !c.auto;
+        adminLog(c.id, 'system', c.auto ? '자동 발행 재개' : '자동 발행 일시정지', c.auto ? 'ok' : 'paused');
+        saveAdmin();
+        render();
+        toast(c.auto ? '자동 발행을 다시 켰어요' : '자동 발행 일시정지', c.name, 'ok');
+        break;
+      }
+      case 'adm-toggle-me': toggleAuto(); break;
+      case 'adm-plan': openAdminPlanSheet(el.dataset.id); break;
+      case 'adm-plan-pick': {
+        const c = admin.customers.find(x => x.id === el.dataset.id);
+        const p = el.dataset.plan;
+        if (!c || !PLANS[p]) break;
+        const wasExpired = c.plan === 'trial' && c.trialEnds && c.trialEnds <= Date.now();
+        c.plan = p;
+        c.trialEnds = p === 'trial' ? Date.now() + 14 * DAY : null;
+        if (p === 'trial' || wasExpired) c.auto = true;   // 만료된 체험을 유료로 바꾸면 발행을 다시 켭니다
+        adminLog(c.id, 'system', '요금제를 ' + ADMIN_PLAN_LABEL[p] + '로 바꿨습니다', 'ok');
+        saveAdmin();
+        closeSheet(true);
+        render();
+        toast('요금제를 바꿨어요', c.name + ' · ' + ADMIN_PLAN_LABEL[p] + (PLANS[p].price ? ' ' + (PLANS[p].price / 10000) + '만원' : ''), 'ok');
+        break;
+      }
+      case 'adm-logs': openAdminLogSheet(el.dataset.id); break;
+      case 'adm-filter': admFilter = el.dataset.f; render(); break;
+      case 'adm-retry': {
+        const l = admin.logs.find(x => x.id === el.dataset.id);
+        if (!l || l.retry !== 'waiting') break;
+        l.retry = 'done';
+        l.state = 'ok';
+        adminLog(l.customerId, 'publish', '재시도 성공 — 대기하던 글이 발행됐습니다', 'ok');
+        saveAdmin();
+        render();
+        toast('재시도 성공', '대기하던 글 1건이 발행됐어요', 'ok');
+        break;
+      }
+      case 'adm-reset':
+        openSheet('<h3>시뮬레이션 초기화</h3><p class="sh-sub">데모 고객 5곳과 발행·오류 로그를 처음 상태로 되돌립니다. 내 앱 설정과 예약은 그대로입니다.</p>' +
+          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
+          '<button class="btn primary" data-act="adm-reset-confirm">초기화</button></div>');
+        break;
+      case 'adm-reset-confirm':
+        admin = seedAdmin();
+        saveAdmin();
+        closeSheet(true);
+        render();
+        toast('초기화했어요', '데모 고객·로그를 처음 상태로', 'ok');
+        break;
       case 'reset':
         openSheet('<h3>데모 데이터 초기화</h3><p class="sh-sub">계정 연결, 예약, 로그, 설정이 지워지고 처음 단계로 돌아갑니다. 로그인 상태는 유지됩니다.</p>' +
           '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
@@ -1989,6 +2328,14 @@
   });
 
   document.addEventListener('input', e => {
+    if (e.target && e.target.id === 'adm-q') {
+      admQuery = e.target.value;
+      const pos = e.target.selectionStart;
+      render();
+      const box = $('#adm-q');
+      if (box) { box.focus(); try { box.setSelectionRange(pos, pos); } catch (err) { /* ignore */ } }
+      return;
+    }
     if (e.target && (e.target.id === 'login-pass' || e.target.id === 'login-email')) authMsg('');
   });
 
@@ -2020,6 +2367,7 @@
   /* ---------------------------------------------------------------- 부팅 */
   load();
   loadAuth();
+  loadAdmin();
   if (!location.hash) {
     location.hash = '#/' + (!isLoggedIn() ? 'login' : (state.onboarded ? 'home' : 'connect'));
   }

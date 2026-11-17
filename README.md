@@ -5,7 +5,7 @@
 **실제 스레드 계정에는 아무 것도 게시되지 않습니다**(발행은 시뮬레이션).
 
 - v0.9.1: 로그인/회원가입 게이트 · 반말/존댓말 토글 · 스레드 계정 연결 화면의 메타 계정 복구 링크
-- v0.9.2: 운영사 표기에 실제 붐비다 로고 적용 — `icons/bumbida-logo.svg`(bumbida.com 공식 `logo.svg`와 동일 파일)를 로그인/회원가입 `by 붐비다`, 연결 화면 kicker·`Powered by 붐비다`, 설정·요금제 푸터에 넣음. 서비스 워커 캐시를 `threadpilot-v4`로 올리고 로고를 캐시 목록에 추가
+- v0.9.3: 운영자용 **관리자 콘솔(`#/admin`)** 데모 — 설정 하단 `운영 · 붐비다 (BUMBIDA)` → **붐비다 관리자 콘솔**, 또는 주소 끝에 `#/admin`으로 바로 열립니다. KPI 4칸(활성 고객·이번 달 구독(MRR)·오늘 전체 발행·오류·재시도 대기), 데모 고객 5곳 + 현재 로그인 계정 카드에서 **자동 발행 일시정지/재개 · 요금제 변경 · 상세 로그 보기**가 실제로 동작하고, 오늘 발행·오류 로그를 고객·핸들·문구로 검색하고 전체/정상/일시정지로 거를 수 있습니다. 값은 `localStorage['threadpilot.admin.v1']`에만 저장되는 **로컬 시뮬레이션**(실서버 DB 연동 전, 화면 상단 배지 표기). 서비스 워커 캐시 `threadpilot-v5`
 - 브랜딩: 운영사 **붐비다 (BUMBIDA)** 표기 — 로그인/회원가입 워드마크 아래 `by 붐비다`, 연결 화면 `붐비다 자동화 스튜디오`·`Powered by 붐비다`, 설정·요금제 하단 `ThreadPilot 운영 · 붐비다 (BUMBIDA)` 푸터 (사업자번호·연락처는 임의로 넣지 않음)
 
 ---
@@ -53,6 +53,8 @@ python3 -m http.server 8000
 7. **요금제** — 무료 체험(D-14) → 프로 변경(결제 없음).
 8. **로그아웃** — 설정 맨 아래 → 다시 로그인하면 같은 설정으로 이어집니다.
 
+9. **관리자 콘솔** — 설정 맨 아래 `운영 · 붐비다 (BUMBIDA)` → **붐비다 관리자 콘솔** (또는 `#/admin`). 고객 카드에서 `일시정지`를 누르면 상태·오늘 발행 수·MRR이 바로 바뀌고, `요금제 변경`·`로그 보기`도 그 자리에서 동작합니다. 검색창에 `요가`처럼 치면 고객과 로그가 함께 걸러집니다. 새로고침해도 그대로 남습니다.
+
 처음 상태로 되돌리려면 설정 → **데모 데이터 초기화**(로그인은 유지).
 
 ---
@@ -66,8 +68,9 @@ threads-auto/
 ├── app.js          # 상태·라우터·화면·시트·타이머
 ├── manifest.json   # PWA 설정
 ├── sw.js           # 오프라인 캐시
-├── icons/          # 앱 아이콘 · 붐비다 로고(bumbida-logo.svg)
+├── icons/          # 앱 아이콘
 ├── fonts/          # Pretendard (로컬 번들, 오프라인에서도 동일한 글꼴)
+├── PLAN.md         # 데이터 구조·실서비스화 계획(메타 앱 심사·API 한도 포함)
 └── README.md
 ```
 
@@ -75,8 +78,9 @@ threads-auto/
 
 ## 기술 메모
 
-- 화면: 해시 라우터(`#/login`, `#/signup`, `#/connect`, `#/home`, `#/drafts`, `#/calendar`, `#/log`, `#/settings`, `#/replies`, `#/pricing`)
-- 상태: `localStorage['threadpilot.state.v1']`
+- 화면: 해시 라우터(`#/login`, `#/signup`, `#/connect`, `#/home`, `#/drafts`, `#/calendar`, `#/log`, `#/settings`, `#/replies`, `#/pricing`, `#/admin`)
+- 상태: `localStorage['threadpilot.state.v1']` (스키마는 `PLAN.md` 3장)
+- 관리자 콘솔(데모): `localStorage['threadpilot.admin.v1']` — 데모 고객 5곳·발행/오류 로그. 실서비스에서는 운영자 권한 검사 + 서버 API가 필요합니다.
 - 인증: `localStorage['threadpilot.auth.v1']` — `users[]`(salt + SHA-256 해시) + `session`.
   세션이 없으면 해시로 다른 화면을 열어도 로그인 화면으로 돌아갑니다. 데모 인증이며 **실제 서버·이메일 발송·OAuth는 없습니다**.
   실서비스에서는 이메일 인증 · bcrypt/argon2 해시 · OAuth · 서버 세션 토큰이 필요합니다(PLAN.md 7.10).
@@ -85,4 +89,4 @@ threads-auto/
 - 초안 생성: 네트워크 호출 없는 템플릿 조합(말투 2 × 톤 4 × 주제 3), 금지어 필터
 - 데스크톱에서 열면 390×844 휴대폰 프레임으로 표시되어 그대로 시연하기 좋습니다.
 - 운영사 브랜드 문구는 `app.js` 상단 `OPERATOR`/`OP_LINE` 상수 한 곳에 모여 있습니다(`붐비다` / `BUMBIDA` / `붐비다 자동화 스튜디오`).
-- 앱 셸을 바꾼 뒤에는 `sw.js`의 `CACHE` 값을 함께 올리세요(현재 `threadpilot-v3`).
+- 앱 셸을 바꾼 뒤에는 `sw.js`의 `CACHE` 값을 함께 올리세요(현재 `threadpilot-v5`).
