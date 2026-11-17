@@ -70,7 +70,6 @@ threads-auto/
 ├── sw.js           # 오프라인 캐시
 ├── icons/          # 앱 아이콘
 ├── fonts/          # Pretendard (로컬 번들, 오프라인에서도 동일한 글꼴)
-├── PLAN.md         # 데이터 구조·실서비스화 계획(메타 앱 심사·API 한도 포함)
 └── README.md
 ```
 
@@ -79,11 +78,11 @@ threads-auto/
 ## 기술 메모
 
 - 화면: 해시 라우터(`#/login`, `#/signup`, `#/connect`, `#/home`, `#/drafts`, `#/calendar`, `#/log`, `#/settings`, `#/replies`, `#/pricing`, `#/admin`)
-- 상태: `localStorage['threadpilot.state.v1']` (스키마는 `PLAN.md` 3장)
+- 상태: `localStorage['threadpilot.state.v1']`
 - 관리자 콘솔(데모): `localStorage['threadpilot.admin.v1']` — 데모 고객 5곳·발행/오류 로그. 실서비스에서는 운영자 권한 검사 + 서버 API가 필요합니다.
 - 인증: `localStorage['threadpilot.auth.v1']` — `users[]`(salt + SHA-256 해시) + `session`.
   세션이 없으면 해시로 다른 화면을 열어도 로그인 화면으로 돌아갑니다. 데모 인증이며 **실제 서버·이메일 발송·OAuth는 없습니다**.
-  실서비스에서는 이메일 인증 · bcrypt/argon2 해시 · OAuth · 서버 세션 토큰이 필요합니다(PLAN.md 7.10).
+  실서비스에서는 이메일 인증 · bcrypt/argon2 해시 · OAuth · 서버 세션 토큰이 필요합니다.
 - 말투: `state.settings.formality`(`casual` 반말 / `formal` 존댓말) — 초안 글과 댓글 자동 답글에 **동시에** 적용. 템플릿 뱅크는 말투별로 두 벌(`GEN[formality][tone]`, `REPLY_BANK[formality][tone][intent]`)이라 어미 치환으로 문장이 깨지지 않습니다.
 - 발행 처리: 20초 주기 타이머가 `scheduled` 이면서 시각이 지난 항목을 `published`로 바꾸고 로그·토스트 기록
 - 초안 생성: 네트워크 호출 없는 템플릿 조합(말투 2 × 톤 4 × 주제 3), 금지어 필터
