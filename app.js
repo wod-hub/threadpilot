@@ -1,11 +1,11 @@
 /* =========================================================================
-   ThreadPilot — 스레드 예약 발행 · 댓글 자동 답글 (데모 PWA)
-   상태는 localStorage에 저장되고, 발행은 시뮬레이션입니다.
+   ThreadPilot — 스레드 예약 발행 · 댓글 자동 답글
+   화면(정적 PWA)은 GitHub Pages, 데이터·인증·발행은 같은 도메인의
+   /api/* · /oauth/* (Cloudflare Worker + D1)가 담당합니다.
    ========================================================================= */
 (function () {
   'use strict';
 
-  const STORE_KEY = 'threadpilot.state.v1';
   const MIN = 60000, HOUR = 3600000, DAY = 86400000;
 
   // 운영사 표기 — ThreadPilot은 붐비다(BUMBIDA)가 운영하는 자동화 스튜디오 제품입니다.
@@ -39,12 +39,6 @@
     const t = TONES.find(x => x.id === tone) || TONES[0];
     return t.hint;
   }
-
-  const DEMO_ACCOUNTS = [
-    { handle: '@lastone.training', name: '라스트원 트레이닝', color: '#FF3B5C' },
-    { handle: '@lastone.gym', name: '라스트원 양주점', color: '#111114' },
-    { handle: '@vandal.belt', name: 'VANDAL 벨트', color: '#6C5CE7' }
-  ];
 
   const TAGS = {
     '크로스핏': ['#크로스핏', '#라스트원트레이닝'],
@@ -450,10 +444,66 @@
     }
   };
 
-  /* ---------------------------------------------------------------- 상태 */
+  /* ---------------------------------------------------------------- API
+     화면은 thread.bumbida.com(GitHub Pages), 데이터는 같은 도메인의
+     /api/* · /oauth/* (Cloudflare Worker + D1)가 담당합니다.
+     세션은 HttpOnly 쿠키(tp_session)라 JS가 토큰을 다루지 않습니다.
+  ------------------------------------------------------------------------ */
+  async function api(path, options) {
+    const opts = options || {};
+    const init = { method: opts.method || 'GET', credentials: 'include', cache: 'no-store', headers: {} };
+    if (opts.body !== undefined) {
+      init.headers['content-type'] = 'application/json';
+      init.body = JSON.stringify(opts.body);
+    }
+    let res;
+    try {
+      res = await fetch(path, init);
+    } catch (e) {
+      const err = new Error('서버에 연결하지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.');
+      err.status = 0;
+      err.code = 'network';
+      throw err;
+    }
+    let payload = null;
+    try { payload = await res.json(); } catch (e) { payload = null; }
+    if (!res.ok || (payload && payload.ok === false)) {
+      const info = (payload && payload.error) || {};
+      const err = new Error(info.message || '요청을 처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      err.status = res.status;
+      err.code = info.code || 'http_' + res.status;
+      err.extra = info;
+      if (res.status === 401 && me && !opts.keepSession) sessionExpired();
+      throw err;
+    }
+    return payload ? payload.data : null;
+  }
+
+  function errText(e) {
+    if (!e) return '요청을 처리하지 못했어요.';
+    if (e.status === 0) return e.message;
+    if (e.code === 'no_connected_account') return '먼저 Threads 계정을 연결해 주세요.';
+    if (e.code === 'weak_password') return '비밀번호는 8자 이상이어야 해요.';
+    if (e.code === 'email_taken') return '이미 가입된 이메일이에요. 로그인해 주세요.';
+    if (e.code === 'invalid_email') return '이메일 형식을 확인해 주세요.';
+    if (e.code === 'invalid_credentials') return '이메일 또는 비밀번호가 맞지 않아요.';
+    if (e.code === 'too_many_attempts') return '로그인 시도가 너무 많아요. 잠시 후 다시 시도해 주세요.';
+    if (e.code === 'slot_taken') return '그 시각에는 이미 예약이 있어요. 다른 시간을 골라 주세요.';
+    if (e.code === 'duplicate_post') return '같은 문구가 이미 예약되어 있어요.';
+    if (e.code === 'text_too_long') return '글자는 500자까지 쓸 수 있어요.';
+    if (e.code === 'account_limit') return e.message;
+    if (e.code === 'needs_reauth') return 'Threads 연결이 만료됐어요. 계정을 다시 연결해 주세요.';
+    return e.message || '요청을 처리하지 못했어요.';
+  }
+
+  /* ---------------------------------------------------------------- 상태
+     state는 "서버 응답을 화면 모양으로 담는 그릇"입니다. localStorage에는
+     서버에 없는 것(초안·주 단위·읽음 시각)만 저장합니다.
+  ------------------------------------------------------------------------ */
   function defaultState() {
     return {
-      v: 1,
+      v: 2,
+      me: null,
       onboarded: false,
       accounts: [],
       active: null,
@@ -461,103 +511,223 @@
         topics: ['크로스핏', '헬스장 운영', '창업'],
         tone: 'friendly',
         formality: 'casual',   // 'casual' 반말 | 'formal' 존댓말 — 초안·답글 공통
-        banned: ['최고', '무조건'],
+        banned: [],
         perDay: 3,
         slots: ['08:00', '12:30', '19:00'],
         autoPublish: true,
-        replies: { enabled: true, tone: 'friendly', delay: '5분' }
+        replies: { enabled: true, tone: 'friendly', delay: '5분', dailyCap: 50 },
+        escalateKeywords: []
       },
       drafts: [],
       queue: [],
       logs: [],
-      sentReplies: [],
+      replies: [],
+      replyCounts: { sent: 0, pending: 0, escalated: 0, failed: 0 },
       plan: 'trial',
+      trialDaysLeft: 14,
       seenLog: 0,
+      week: 0,
       seq: {},
-      owner: null,            // 이 데이터의 주인(로그인 사용자 id)
-      trialStartedAt: null,   // 회원가입 시 무료 체험 D-14 시작
-      createdAt: Date.now()
+      loaded: false,
+      loading: false,
+      lastError: null
     };
   }
 
   let state = defaultState();
+  let me = null;
+  const isLoggedIn = () => !!me;
+  const sessionUser = () => (me ? { id: me.id, email: me.email, name: me.name, role: me.role } : null);
+  const trialLeftDays = () => (me && typeof me.trialDaysLeft === 'number' ? me.trialDaysLeft : state.trialDaysLeft);
 
-  function load() {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      state = Object.assign(defaultState(), saved);
-      state.settings = Object.assign(defaultState().settings, saved.settings || {});
-      state.settings.replies = Object.assign(defaultState().settings.replies, (saved.settings || {}).replies || {});
-    } catch (e) {
-      state = defaultState();
-    }
+  function localKey(suffix) {
+    return 'threadpilot.' + suffix + '.v2.' + ((me && me.id) || 'guest');
   }
   function save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ }
-  }
-
-  /* ------------------------------------------------------------- 인증(데모)
-     실제 인증 서버가 없습니다. 계정과 세션은 이 브라우저의 localStorage에만
-     남고, 비밀번호는 평문 대신 salt + SHA-256 해시로만 저장합니다.
-     실서비스에서는 bcrypt/argon2 해시 + 이메일 인증 + OAuth + 서버 세션 토큰이
-     필요합니다(PLAN.md 7.10).
-  ------------------------------------------------------------------------ */
-  const AUTH_KEY = 'threadpilot.auth.v1';
-  let auth = { users: [], session: null };
-
-  function loadAuth() {
     try {
-      const raw = localStorage.getItem(AUTH_KEY);
+      localStorage.setItem(localKey('local'), JSON.stringify({
+        drafts: state.drafts, week: state.week, seenLog: state.seenLog, seq: state.seq
+      }));
+    } catch (e) { /* 저장 공간이 없어도 화면은 계속 돕니다 */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(localKey('local'));
       if (!raw) return;
-      const p = JSON.parse(raw);
-      auth.users = Array.isArray(p.users) ? p.users : [];
-      auth.session = p.session || null;
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved.drafts)) state.drafts = saved.drafts;
+      if (typeof saved.week === 'number') state.week = saved.week;
+      if (typeof saved.seenLog === 'number') state.seenLog = saved.seenLog;
+      if (saved.seq && typeof saved.seq === 'object') state.seq = saved.seq;
+    } catch (e) { /* 무시 */ }
+  }
+
+  /* ---------------------------------------------------------------- 동기화 */
+  const ACCOUNT_COLORS = ['#FF3B5C', '#111114', '#6C5CE7', '#1F6F5C', '#C2489B'];
+  const DELAY_LABEL = { 0: '즉시', 60: '1분', 300: '5분' };
+  function delaySeconds(label) {
+    if (label === '즉시') return 0;
+    if (label === '1분') return 60;
+    return 300;
+  }
+
+  function applyProfile(profile) {
+    me = profile || null;
+    state.me = profile || null;
+    if (!profile) return;
+    state.plan = profile.plan || 'trial';
+    state.trialDaysLeft = typeof profile.trialDaysLeft === 'number' ? profile.trialDaysLeft : state.trialDaysLeft;
+  }
+
+  async function loadMe() {
+    const profile = await api('/api/auth/me');
+    applyProfile(profile);
+    return profile;
+  }
+
+  async function loadAccounts() {
+    const data = await api('/api/threads/accounts');
+    const list = (data && data.accounts) || [];
+    state.accounts = list.map((a, i) => ({
+      id: a.id,
+      name: a.name || a.handle || 'Threads 계정',
+      handle: a.handle || (a.username ? '@' + a.username : ''),
+      username: a.username || '',
+      status: a.status,
+      needsReauth: !!a.needsReauth,
+      isPrimary: !!a.isPrimary,
+      color: ACCOUNT_COLORS[i % ACCOUNT_COLORS.length],
+      connectedAt: a.connectedAt,
+      tokenExpiresAt: a.tokenExpiresAt,
+      pictureUrl: a.pictureUrl || null
+    }));
+    state.active = (data && data.activeAccountId) || (state.accounts[0] && state.accounts[0].id) || null;
+    state.onboarded = state.accounts.length > 0;
+    return data;
+  }
+
+  function applyRule(rule) {
+    if (!rule) return;
+    const replies = rule.replies || {};
+    state.settings = {
+      topics: Array.isArray(rule.topics) && rule.topics.length ? rule.topics : ['오늘'],
+      tone: rule.tone || 'friendly',
+      formality: rule.formality === 'formal' ? 'formal' : 'casual',
+      banned: Array.isArray(rule.banned) ? rule.banned : [],
+      perDay: Number(rule.perDay) || 3,
+      slots: Array.isArray(rule.slots) && rule.slots.length ? rule.slots : ['08:00', '12:30', '19:00'],
+      autoPublish: rule.autoPublish !== false,
+      replies: {
+        enabled: replies.enabled !== false,
+        tone: replies.tone || 'friendly',
+        delay: DELAY_LABEL[Number(replies.delay)] || '5분',
+        dailyCap: Number(replies.dailyCap) || 50
+      },
+      escalateKeywords: Array.isArray(rule.escalateKeywords) ? rule.escalateKeywords : []
+    };
+  }
+
+  async function loadRules() {
+    const rule = await api('/api/rules');
+    applyRule(rule);
+    return rule;
+  }
+
+  function mapPost(p) {
+    return {
+      id: p.id,
+      acct: p.accountId,
+      text: p.text,
+      at: Date.parse(p.scheduledAt),
+      scheduledAt: p.scheduledAt,
+      status: p.status,
+      auto: !!p.auto,
+      topic: p.topic || '오늘',
+      tone: p.tone || null,
+      formality: p.formality || null,
+      publishedAt: p.publishedAt ? Date.parse(p.publishedAt) : null,
+      errorCode: p.errorCode || null,
+      errorMessage: p.errorMessage || null,
+      permalink: p.permalink || null,
+      handle: p.handle || null
+    };
+  }
+
+  async function loadPosts() {
+    const from = new Date(Date.now() - 14 * DAY).toISOString();
+    const to = new Date(Date.now() + 60 * DAY).toISOString();
+    const data = await api('/api/posts?limit=200&from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
+    state.queue = ((data && data.posts) || []).map(mapPost);
+    return state.queue;
+  }
+
+  async function loadLogs() {
+    const data = await api('/api/logs?limit=120');
+    state.logs = ((data && data.logs) || []).map(l => ({
+      id: l.id, type: l.type, at: Date.parse(l.at), text: l.text, qid: l.postId || null,
+      auto: l.auto === null || l.auto === undefined ? null : !!l.auto, level: l.level || 'info'
+    }));
+    return state.logs;
+  }
+
+  async function loadReplies() {
+    const data = await api('/api/replies?limit=50');
+    state.replies = ((data && data.replies) || []).map(r => ({
+      id: r.id, author: r.author || '', text: r.text, receivedAt: Date.parse(r.receivedAt),
+      intent: r.intent, autoReplyText: r.autoReplyText, status: r.status, errorCode: r.errorCode
+    }));
+    state.replyCounts = (data && data.counts) || { sent: 0, pending: 0, escalated: 0, failed: 0 };
+    return state.replies;
+  }
+
+  async function syncAll() {
+    state.loading = true;
+    try {
+      await Promise.all([loadAccounts(), loadRules(), loadPosts(), loadLogs(), loadReplies()]);
+      state.lastError = null;
+    } finally {
+      state.loading = false;
+      state.loaded = true;
+    }
+  }
+
+  /** 60초 폴링 — 서버가 발행·답글을 처리한 결과를 화면에 반영한다. */
+  async function refreshData(silent) {
+    if (!me) return;
+    const seen = new Set(state.logs.map(l => l.id));
+    try {
+      await Promise.all([loadPosts(), loadLogs()]);
+      if (currentView() === 'replies') await loadReplies();
+      const fresh = state.logs.filter(l => !seen.has(l.id) && l.type === 'publish' && Date.now() - l.at < 6 * HOUR);
+      if (fresh.length && !silent) toast('발행 완료', excerpt(fresh[0].text, 20), 'ok');
+      if (fresh.length) return true;
     } catch (e) {
-      auth = { users: [], session: null };
+      if (!silent) toast('새로고침 실패', errText(e), 'warn');
     }
-  }
-  function saveAuth() {
-    try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch (e) { /* ignore */ }
-  }
-  const isLoggedIn = () => !!(auth.session && auth.session.userId);
-  const sessionUser = () => auth.users.find(u => u.id === (auth.session && auth.session.userId)) || null;
-
-  function randomSalt() {
-    const b = new Uint8Array(16);
-    if (window.crypto && window.crypto.getRandomValues) window.crypto.getRandomValues(b);
-    else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
-    return Array.from(b).map(x => x.toString(16).padStart(2, '0')).join('');
-  }
-  function fallbackHash(str) {
-    // crypto.subtle을 쓸 수 없는 환경(file:// 등)용 대체 해시 (FNV-1a 32bit ×2)
-    let h1 = 0x811c9dc5, h2 = 0x1b873593;
-    for (let i = 0; i < str.length; i++) {
-      const c = str.charCodeAt(i);
-      h1 = ((h1 ^ c) * 16777619) >>> 0;
-      h2 = ((h2 + c) * 2654435761) >>> 0;
-    }
-    return ('0000000' + h1.toString(16)).slice(-8) + ('0000000' + h2.toString(16)).slice(-8);
-  }
-  async function sha256Hex(str) {
-    if (window.crypto && window.crypto.subtle && window.crypto.subtle.digest && window.TextEncoder) {
-      try {
-        const buf = new window.TextEncoder().encode(str);
-        const dig = await window.crypto.subtle.digest('SHA-256', buf);
-        return Array.from(new Uint8Array(dig)).map(b => b.toString(16).padStart(2, '0')).join('');
-      } catch (e) { /* fall through */ }
-    }
-    return fallbackHash(str);
-  }
-  async function hashPassword(pw, salt) {
-    return 'sha256-' + await sha256Hex(salt + '::' + pw + '::threadpilot');
+    return false;
   }
 
+  function resetStateFor(profile) {
+    const keepWeek = state.week;
+    state = defaultState();
+    state.week = keepWeek || 0;
+    applyProfile(profile);
+    load();
+  }
+
+  function sessionExpired() {
+    me = null;
+    state = defaultState();
+    if (location.hash !== '#/login') location.hash = '#/login';
+    render();
+    toast('로그인이 만료됐어요', '다시 로그인해 주세요', 'warn');
+  }
+
+  /* ---------------------------------------------------------------- 인증 */
   const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   function authMsg(msg) {
     const el = $('#auth-err');
-    if (!el) { toast(msg); return; }
+    if (!el) { if (msg) toast(msg); return; }
     el.textContent = msg;
     el.classList.toggle('show', !!msg);
   }
@@ -567,27 +737,15 @@
     btn.disabled = !!busy;
     btn.textContent = busy ? (label || '처리 중…') : (btn.dataset.label || '로그인');
   }
-  function trialLeftDays() {
-    const start = state.trialStartedAt || state.createdAt || Date.now();
-    return Math.max(0, 14 - Math.floor((Date.now() - start) / DAY));
-  }
 
-  function adoptUser(user) {
-    if (state.owner && state.owner !== user.id) state = defaultState();
-    state.owner = user.id;
-    if (!state.trialStartedAt) state.trialStartedAt = user.trialStartedAt || Date.now();
-    if (!state.createdAt) state.createdAt = state.trialStartedAt;
-  }
-
-  function startSession(user, message) {
-    auth.session = { userId: user.id, email: user.email, name: user.name, at: Date.now() };
-    saveAuth();
-    adoptUser(user);
+  async function afterAuth(profile, message) {
+    resetStateFor(profile);
+    try { await syncAll(); } catch (e) { state.lastError = errText(e); }
     save();
     closeSheet(true);
-    go(state.onboarded ? 'home' : 'connect');
+    go(state.accounts.length ? 'home' : 'connect');
     render();
-    if (message) toast(message, user.name + ' · ' + user.email, 'ok');
+    if (message) toast(message, (profile.name || '') + ' · ' + (profile.email || ''), 'ok');
   }
 
   async function doSignup() {
@@ -600,19 +758,18 @@
     if (pw.length < 8) return authMsg('비밀번호는 8자 이상으로 정해 주세요.');
     if (pw !== pw2) return authMsg('비밀번호가 서로 달라요.');
     if (!name.trim()) return authMsg('이름을 입력해 주세요.');
-    if (auth.users.some(u => u.email === em)) return authMsg('이미 가입된 이메일이에요. 로그인해 주세요.');
     authMsg('');
     authBusy(true, '가입 중…');
-    const salt = randomSalt();
-    const user = {
-      id: uid('u'), email: em, name: name.trim(), salt: salt,
-      hash: await hashPassword(pw, salt),
-      createdAt: Date.now(), trialStartedAt: Date.now()
-    };
-    auth.users.push(user);
-    state.trialStartedAt = user.trialStartedAt;
-    saveAuth();
-    startSession(user, '가입 완료 · 무료 체험 14일 시작');
+    try {
+      const profile = await api('/api/auth/signup', {
+        method: 'POST', keepSession: true,
+        body: { email: em, password: pw, name: name.trim() }
+      });
+      await afterAuth(profile, '가입 완료 · 무료 체험 14일 시작');
+    } catch (e) {
+      authBusy(false);
+      authMsg(errText(e));
+    }
   }
 
   async function doLogin() {
@@ -620,44 +777,41 @@
     const pw = (($('#login-pass') || {}).value) || '';
     if (!EMAIL_RE.test(em)) return authMsg('이메일 주소 형식을 확인해 주세요.');
     if (!pw) return authMsg('비밀번호를 입력해 주세요.');
-    const user = auth.users.find(u => u.email === em);
-    if (!user) return authMsg('등록된 계정이 없어요. 회원가입으로 시작해 주세요.');
     authMsg('');
     authBusy(true, '로그인 중…');
-    const hash = await hashPassword(pw, user.salt);
-    if (hash !== user.hash) { authBusy(false); return authMsg('비밀번호가 맞지 않아요.'); }
-    startSession(user, '다시 오신 걸 환영해요');
+    try {
+      const profile = await api('/api/auth/login', {
+        method: 'POST', keepSession: true,
+        body: { email: em, password: pw }
+      });
+      await afterAuth(profile, '다시 오신 걸 환영해요');
+    } catch (e) {
+      authBusy(false);
+      authMsg(errText(e));
+    }
   }
 
-  function doLogout() {
-    auth.session = null;
-    saveAuth();
-    closeSheet(true);
+  async function doLogout() {
+    try { await api('/api/auth/logout', { method: 'POST', keepSession: true, body: {} }); } catch (e) { /* 쿠키는 만료됩니다 */ }
+    me = null;
+    state = defaultState();
     logFilter = 'all';
+    closeSheet(true);
     location.hash = '#/login';
     render();
     toast('로그아웃했어요', '다시 로그인하면 설정이 그대로 이어져요');
   }
 
+  const SOCIAL_LABEL = { kakao: '카카오', google: '구글', apple: 'Apple' };
   function socialLogin(provider) {
-    const meta = { kakao: ['카카오', 'kakao.demo@threadpilot.app'], google: ['구글', 'google.demo@threadpilot.app'], apple: ['Apple', 'apple.demo@threadpilot.app'] }[provider] || ['소셜', 'demo@threadpilot.app'];
-    openSheet('<h3>' + meta[0] + ' 로그인 (데모)</h3>' +
-      '<p class="sh-sub">실제 서비스에서는 ' + meta[0] + ' OAuth 창이 열리고 인증이 끝나면 이 앱으로 돌아옵니다. 지금은 데모라 그 과정을 건너뛰고 테스트 계정으로 들어갑니다.</p>' +
-      '<div class="sheet-body"><p class="fine" style="margin-top:14px">테스트 계정 · ' + meta[1] + '</p></div>' +
-      '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
-      '<button class="btn primary" data-act="social-continue" data-p="' + provider + '">데모로 계속</button></div>');
+    const label = SOCIAL_LABEL[provider] || '소셜';
+    openSheet('<h3>' + label + ' 로그인</h3>' +
+      '<p class="sh-sub">' + label + ' 계정 연동은 아직 준비 중이에요. 지금은 이메일로 가입한 계정으로 로그인해 주세요.</p>' +
+      '<div class="sheet-body"><p class="fine" style="margin-top:14px">Threads 계정 연결은 로그인 후 연결 화면에서 메타 로그인 창으로 진행됩니다.</p></div>' +
+      '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button>' +
+      '<button class="btn primary" data-act="nav" data-to="signup">이메일로 가입</button></div>');
   }
-
-  function socialContinue(provider) {
-    const meta = { kakao: ['카카오', 'kakao.demo@threadpilot.app'], google: ['구글', 'google.demo@threadpilot.app'], apple: ['Apple', 'apple.demo@threadpilot.app'] }[provider] || ['소셜', 'demo@threadpilot.app'];
-    let user = auth.users.find(u => u.email === meta[1]);
-    if (!user) {
-      user = { id: uid('u'), email: meta[1], name: '한동엽', salt: randomSalt(), hash: '', provider: provider, createdAt: Date.now(), trialStartedAt: Date.now() };
-      auth.users.push(user);
-      saveAuth();
-    }
-    startSession(user, meta[0] + ' 데모 계정으로 로그인');
-  }
+  function socialContinue() { socialLogin('kakao'); }
 
   /* ---------------------------------------------------------------- 유틸 */
   const $ = sel => document.querySelector(sel);
@@ -791,92 +945,66 @@
     return bank[intent] || bank.price;
   }
 
-  /* ---------------------------------------------------------------- 로그 */
-  function addLog(type, at, text, qid, auto) {
-    state.logs.push({ id: uid('l'), type: type, at: at, text: text, qid: qid || null, auto: auto !== false });
-    if (state.logs.length > 400) state.logs = state.logs.slice(-400);
-  }
-
-  /* ---------------------------------------------------------------- 데모 데이터 */
+  /* ---------------------------------------------------------------- 서버 발행 */
   function isSlotTaken(at) {
     return state.queue.some(q => Math.abs(q.at - at) < MIN);
   }
 
-  function ensureFill(force) {
-    const s = state.settings;
-    if (!s.autoPublish && !force) return;
-    const now = Date.now();
-    const acct = state.active;
-    for (let d = 0; d < 4; d++) {
-      const day = new Date(); day.setDate(day.getDate() + d); day.setHours(0, 0, 0, 0);
-      const day0 = day.getTime(), day1 = day0 + DAY;
-      const dayItems = state.queue.filter(q => q.at >= day0 && q.at < day1);
-      if (dayItems.length > 0 && !force) continue;
-      s.slots.slice(0, s.perDay).forEach((hm, idx) => {
-        const at = atOn(day, hm);
-        if (at <= now + 3 * MIN) return;
-        if (dayItems.some(q => Math.abs(q.at - at) < MIN)) return;
-        const topic = s.topics[(d + idx) % Math.max(1, s.topics.length)] || '오늘';
-        state.queue.push({
-          id: uid('q'), acct: acct, text: compose(topic, s.tone), at: at,
-          status: 'scheduled', topic: topic, tone: s.tone, formality: s.formality, auto: true
-        });
-      });
+  /** 서버가 규칙·기존 예약을 반영해 고른 빈 슬롯을 실제 예약으로 채운다. */
+  async function fillWeek() {
+    if (!state.active) {
+      toast('Threads 계정을 먼저 연결해 주세요', '연결 화면으로 이동합니다', 'warn');
+      go('connect');
+      return;
     }
-  }
-
-  function seedDemo() {
-    const now = Date.now();
     const s = state.settings;
-    // 지난 3일 + 오늘 지난 시간대: 발행 완료 기록
-    for (let d = -3; d <= 0; d++) {
-      const day = new Date(); day.setDate(day.getDate() + d); day.setHours(0, 0, 0, 0);
-      s.slots.slice(0, s.perDay).forEach((hm, idx) => {
-        const at = atOn(day, hm);
-        if (at > now - 4 * MIN) return;
-        if (isSlotTaken(at)) return;
-        const topic = s.topics[idx % Math.max(1, s.topics.length)] || '오늘';
-        state.queue.push({
-          id: uid('q'), acct: state.active, text: compose(topic, s.tone), at: at,
-          status: 'published', publishedAt: at, topic: topic, tone: s.tone, formality: s.formality, auto: true
-        });
-      });
+    const n = Math.min(12, Math.max(3, s.perDay * 3));
+    let slots = [];
+    try {
+      const data = await api('/api/slots?n=' + n);
+      slots = (data && data.slots) || [];
+    } catch (e) {
+      toast('빈 시간을 가져오지 못했어요', errText(e), 'warn');
+      return;
     }
-    state.queue.filter(q => q.status === 'published').sort((a, b) => a.at - b.at).forEach(q => {
-      addLog('publish', q.publishedAt || q.at, "'" + excerpt(q.text) + "' 발행 완료", q.id);
-    });
-    addLog('reply', now - 4 * HOUR, '@fitminji 댓글에 자동 답글 전송', null);
-    addLog('reply', now - 27 * HOUR, '@hyun_gym 댓글에 자동 답글 전송', null);
-    addLog('system', now - 30 * HOUR, '라스트원 트레이닝 계정 연결 완료 · threads_basic, threads_content_publish', null);
-    ensureFill(true);
+    if (!slots.length) { toast('채울 빈 시간이 없어요', '이미 예약이 가득해요'); return; }
+    let created = 0, failed = 0, lastErr = null;
+    for (const slot of slots) {
+      const topic = s.topics[created % Math.max(1, s.topics.length)] || '오늘';
+      try {
+        await api('/api/posts', {
+          method: 'POST',
+          body: { text: compose(topic, s.tone, s.formality), at: slot.at, topic: topic, accountId: state.active, auto: true }
+        });
+        created += 1;
+      } catch (e) {
+        lastErr = e;
+        if (e.code === 'slot_taken' || e.code === 'duplicate_post') { failed += 1; continue; }
+        break;
+      }
+    }
+    try { await Promise.all([loadPosts(), loadLogs()]); } catch (e) { /* 아래에서 다시 알림 */ }
     save();
+    render();
+    if (created) toast(created + '건 예약을 채웠어요', failed ? failed + '건은 비슷한 문구로 건넜어요' : '정한 시간에 자동으로 발행합니다', 'ok');
+    else toast('예약을 만들지 못했어요', lastErr ? errText(lastErr) : null, 'warn');
   }
 
-  /* ---------------------------------------------------------------- 발행 처리 */
-  function processDue(silent) {
-    const now = Date.now();
-    const due = state.queue.filter(q => q.status === 'scheduled' && q.at <= now).sort((a, b) => a.at - b.at);
-    if (!due.length) return 0;
-    due.forEach(q => {
-      q.status = 'published';
-      q.publishedAt = q.at;
-      addLog('publish', q.at, "'" + excerpt(q.text) + "' 발행 완료", q.id);
-      if (!silent && now - q.at < 6 * HOUR) toast(hhmm(q.at) + ' 발행 완료', excerpt(q.text, 16));
-    });
-    save();
-    return due.length;
-  }
-
-  function publishNow(id) {
+  async function publishNow(id) {
     const q = state.queue.find(x => x.id === id);
     if (!q) return;
-    q.status = 'published';
-    q.publishedAt = Date.now();
-    addLog('publish', Date.now(), "'" + excerpt(q.text) + "' 발행 완료", q.id, false);
-    save();
     closeSheet(true);
-    render();
-    toast('발행 완료', excerpt(q.text, 14));
+    toast('발행 중…', excerpt(q.text, 16));
+    try {
+      const data = await api('/api/posts/' + encodeURIComponent(id) + '/publish-now', { method: 'POST', body: {} });
+      await Promise.all([loadPosts(), loadLogs()]);
+      render();
+      if (data && data.published) toast('발행 완료', excerpt(q.text, 14), 'ok');
+      else toast('발행하지 못했어요', (data && (data.errorMessage || data.reason)) || '잠시 후 다시 확인해 주세요', 'warn');
+    } catch (e) {
+      toast('발행하지 못했어요', errText(e), 'warn');
+      try { await Promise.all([loadPosts(), loadLogs()]); render(); } catch (err) { /* 무시 */ }
+    }
   }
 
   /* ---------------------------------------------------------------- 토스트 */
@@ -919,12 +1047,12 @@
   }
 
   /* ---------------------------------------------------------------- 시트들 */
-  let sheetPick = 0;
   let pendingDraft = null;
   let pendingSlot = null;
 
+  let cachedSlots = [];
+
   function openConnectSheet() {
-    sheetPick = 0;
     const scopes = [
       ['threads_basic', '프로필과 게시물 읽기'],
       ['threads_content_publish', '글 발행'],
@@ -932,7 +1060,7 @@
       ['threads_manage_replies', '답글 작성']
     ];
     const body = '<h3>Threads 계정 연결</h3>' +
-      '<p class="sh-sub">실제 서비스에서는 메타 로그인 창이 열리고 거기서 직접 로그인합니다. ThreadPilot은 비밀번호를 받지도, 저장하지도 않습니다.</p>' +
+      '<p class="sh-sub">버튼을 누르면 메타 로그인 창이 열립니다. ThreadPilot은 스레드 비밀번호를 받지도, 저장하지도 않습니다.</p>' +
       '<div class="sheet-body">' +
         '<div class="help-line" style="margin-top:14px">' +
           '<span class="hl-ic">' + icon('info', 14) + '</span>' +
@@ -945,63 +1073,60 @@
           scopes.map(s => '<div class="set-row static"><span class="ic" style="background:var(--accent-soft);color:var(--accent)">' + icon('check', 15, 2.2) + '</span>' +
             '<div><div class="lab" style="font-size:13px">' + s[1] + '</div><div class="desc">' + s[0] + '</div></div></div>').join('') +
         '</div>' +
-        '<div class="sec-label">연결할 계정</div>' +
-        '<div class="set-card">' +
-          DEMO_ACCOUNTS.map((a, i) => '<button class="set-row" data-act="acct-pick" data-i="' + i + '" style="cursor:pointer">' +
-            '<span class="avatar" style="background:' + a.color + ';width:34px;height:34px;font-size:13px">' + esc(a.name.slice(0, 1)) + '</span>' +
-            '<div><div class="lab">' + esc(a.name) + '</div><div class="desc">' + esc(a.handle) + '</div></div>' +
-            '<span class="val" data-pick="' + i + '">' + (i === 0 ? icon('check', 18, 2.2) : '') + '</span></button>').join('') +
-        '</div>' +
-        '<p class="fine" style="margin-top:12px">데모 모드 · 위 링크는 메타 사이트를 새 탭으로 열기만 하고, 실제 로그인 요청은 보내지 않습니다. 실제 스레드 계정에도 아무 것도 게시되지 않습니다.</p>' +
+        '<p class="fine" style="margin-top:12px">권한을 승인하면 이 계정의 스레드에 글과 답글이 실제로 올라갑니다. 연결은 언제든 설정에서 해제할 수 있어요.</p>' +
       '</div>' +
       '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
-      '<button class="btn primary" data-act="connect-confirm">데모 계정으로 연결</button></div>';
+      '<button class="btn primary" data-act="connect-confirm">메타 로그인으로 연결</button></div>';
     openSheet(body);
   }
 
-  function connectConfirm() {
-    const opt = DEMO_ACCOUNTS[sheetPick] || DEMO_ACCOUNTS[0];
-    let acc = state.accounts.find(a => a.handle === opt.handle);
-    const isNew = !acc;
-    if (!acc) {
-      acc = { id: uid('a'), handle: opt.handle, name: opt.name, color: opt.color, connectedAt: Date.now() };
-      state.accounts.push(acc);
-    }
-    state.active = acc.id;
-    const wasOnboarded = state.onboarded;
-    state.onboarded = true;
-    save();
+  /** 실제 Threads OAuth — 서버가 state를 서명해 인가 URL을 주고, 인증 후 /oauth/threads/callback 으로 돌아옵니다. */
+  async function startThreadsConnect() {
     closeSheet(true);
-    if (!wasOnboarded) {
-      seedDemo();
-      toast(acc.name + ' 계정 연결 완료', '이번 주 예약을 채워 두었어요', 'ok');
-      go('home');
-    } else {
-      ensureFill(false);
-      save();
-      render();
-      toast(isNew ? acc.name + ' 계정을 추가했어요' : '이미 연결된 계정이에요', isNew ? '대표 계정으로 설정했습니다' : acc.handle, 'ok');
+    try {
+      const data = await api('/api/threads/oauth/start');
+      if (!data || !data.authorizeUrl) throw new Error('인가 주소를 받지 못했어요.');
+      location.assign(data.authorizeUrl);
+    } catch (e) {
+      toast('연결을 시작하지 못했어요', errText(e), 'warn');
+      if (e.code === 'no_session') go('login');
     }
   }
+  const connectConfirm = startThreadsConnect;
 
-  function openScheduleSheet(draftId) {
+  async function openScheduleSheet(draftId) {
     const d = state.drafts.find(x => x.id === draftId);
     if (!d) return;
+    if (!state.active) {
+      toast('Threads 계정을 먼저 연결해 주세요', '연결 화면으로 이동합니다', 'warn');
+      go('connect');
+      return;
+    }
     pendingDraft = draftId;
-    const slots = nextSlots(5);
-    pendingSlot = slots.length ? slots[0] : (Date.now() + 10 * MIN);
+    let slots = [];
+    try {
+      const data = await api('/api/slots?n=5');
+      slots = (data && data.slots) || [];
+    } catch (e) {
+      toast('빈 시간을 가져오지 못했어요', errText(e), 'warn');
+      return;
+    }
+    cachedSlots = slots.map(s => ({ at: Date.parse(s.at), label: s.label }));
+    pendingSlot = cachedSlots.length ? cachedSlots[0].at : (Date.now() + 10 * MIN);
     openSheet(
       '<h3>예약 발행</h3>' +
-      '<p class="sh-sub">' + esc(relDay(pendingSlot)) + ' ' + hhmm(pendingSlot) + '에 ' + esc(activeAccount().name) + ' 계정으로 올라갑니다.</p>' +
+      '<p class="sh-sub">' + esc(relDay(pendingSlot)) + ' ' + hhmm(pendingSlot) + '에 ' + esc((activeAccount() || {}).name || 'Threads') + ' 계정으로 올라갑니다.</p>' +
       '<div class="sheet-body">' +
         '<div class="card flat" style="margin-top:14px"><p class="dtext" style="font-size:13px">' + esc(d.text) + '</p></div>' +
-        '<div class="sec-label">발행 시각</div>' +
-        (slots.length && (slots[0] - Date.now()) > 1.2 * DAY
+        '<div class="sec-label">발행 시각 <span style="font-weight:600;color:var(--muted2)">· 서버가 고른 빈 시간</span></div>' +
+        (cachedSlots.length && (cachedSlots[0].at - Date.now()) > 1.2 * DAY
           ? '<p class="fine" style="margin-bottom:8px">가까운 시간대는 이미 예약으로 배정되어 있어요. 가장 빠른 빈 시간을 골라 두었습니다.</p>'
           : '') +
         '<div class="chips" style="flex-direction:column;align-items:stretch;gap:6px" id="slot-list">' +
-          slots.map((t, i) => '<button class="chip ' + (i === 0 ? 'on' : '') + '" data-act="slot-pick" data-t="' + t + '" style="justify-content:space-between;height:44px;padding:0 14px">' +
-            '<span>' + esc(relDay(t)) + ' ' + hhmm(t) + '</span><span class="small" style="font-weight:600">' + untilText(t) + '</span></button>').join('') +
+          (cachedSlots.length
+            ? cachedSlots.map((s, i) => '<button class="chip ' + (i === 0 ? 'on' : '') + '" data-act="slot-pick" data-t="' + s.at + '" style="justify-content:space-between;height:44px;padding:0 14px">' +
+                '<span>' + esc(relDay(s.at)) + ' ' + hhmm(s.at) + '</span><span class="small" style="font-weight:600">' + untilText(s.at) + '</span></button>').join('')
+            : '<p class="small">정한 시간대에 빈 자리가 없어요. 아래에 직접 시각을 넣어 주세요.</p>') +
         '</div>' +
         '<div class="sec-label">직접 입력</div>' +
         '<input type="datetime-local" class="input" id="custom-at" value="' + toLocalInput(pendingSlot) + '" />' +
@@ -1011,26 +1136,7 @@
     );
   }
 
-  function nextSlots(n) {
-    const s = state.settings;
-    const out = [];
-    for (let d = 0; d < 10 && out.length < n; d++) {
-      const day = new Date(); day.setDate(day.getDate() + d); day.setHours(0, 0, 0, 0);
-      const day0 = day.getTime(), day1 = day0 + DAY;
-      const dayItems = state.queue.filter(q => q.at >= day0 && q.at < day1);
-      if (dayItems.length >= s.perDay && out.length) continue;
-      for (const hm of s.slots.slice(0, s.perDay)) {
-        const at = atOn(day, hm);
-        if (at <= Date.now() + 2 * MIN) continue;
-        if (dayItems.some(q => Math.abs(q.at - at) < MIN)) continue;
-        out.push(at);
-        if (out.length >= n) break;
-      }
-    }
-    return out;
-  }
-
-  function scheduleConfirm() {
+  async function scheduleConfirm() {
     const d = state.drafts.find(x => x.id === pendingDraft);
     if (!d) { closeSheet(true); return; }
     const custom = $('#custom-at');
@@ -1039,41 +1145,69 @@
       const t = new Date(custom.value).getTime();
       if (!isNaN(t)) at = t;
     }
-    state.queue.push({
-      id: uid('q'), acct: state.active, text: d.text, at: at,
-      status: 'scheduled', topic: d.topic, tone: d.tone, formality: d.formality, auto: false
-    });
-    d.scheduledAt = at;
-    addLog('system', Date.now(), "초안 예약 · " + relDay(at) + " " + hhmm(at) + " '" + excerpt(d.text, 16) + "'", null);
-    save();
-    closeSheet(true);
-    render();
-    toast(relDay(at) + ' ' + hhmm(at) + ' 예약 완료', excerpt(d.text, 14), 'ok');
+    try {
+      await api('/api/posts', {
+        method: 'POST',
+        body: {
+          text: d.text, at: new Date(at).toISOString(), topic: d.topic,
+          accountId: state.active, auto: false, draftId: d.id
+        }
+      });
+      state.drafts = state.drafts.filter(x => x.id !== d.id);
+      await Promise.all([loadPosts(), loadLogs()]);
+      save(); closeSheet(true); render();
+      toast(relDay(at) + ' ' + hhmm(at) + ' 예약 완료', excerpt(d.text, 14), 'ok');
+    } catch (e) {
+      if (e.code === 'slot_taken') {
+        const alts = (e.extra && e.extra.alternatives) || [];
+        const list = $('#slot-list');
+        if (list && alts.length) {
+          cachedSlots = alts.map(t => ({ at: Date.parse(t) }));
+          pendingSlot = cachedSlots[0].at;
+          list.innerHTML = cachedSlots.map((s, i) => '<button class="chip ' + (i === 0 ? 'on' : '') + '" data-act="slot-pick" data-t="' + s.at + '" style="justify-content:space-between;height:44px;padding:0 14px">' +
+            '<span>' + esc(relDay(s.at)) + ' ' + hhmm(s.at) + '</span><span class="small" style="font-weight:600">' + untilText(s.at) + '</span></button>').join('');
+          const inp = $('#custom-at'); if (inp) inp.value = toLocalInput(pendingSlot);
+        }
+      }
+      toast('예약하지 못했어요', errText(e), 'warn');
+    }
+  }
+
+  function statusLabel(q) {
+    if (q.status === 'published') return '발행 완료';
+    if (q.status === 'failed') return '발행 실패';
+    if (q.status === 'unknown') return '결과 확인 필요';
+    if (q.status === 'missed') return '놓침';
+    if (q.status === 'canceled') return '취소됨';
+    if (q.status === 'publishing') return '발행 중';
+    return '예약됨';
   }
 
   function openItemSheet(id) {
     const q = state.queue.find(x => x.id === id);
     if (!q) return;
     const acc = accountById(q.acct);
-    const isSched = q.status === 'scheduled';
+    const isSched = q.status === 'scheduled' || q.status === 'missed' || q.status === 'failed';
     const meta = [];
     if (acc) meta.push(esc(acc.name));
     meta.push(esc(q.topic));
-    meta.push(TONE_LABEL[q.tone] || '');
-    meta.push(FORMALITY_LABEL[q.formality] || '');
+    if (q.tone) meta.push(TONE_LABEL[q.tone] || '');
+    if (q.formality) meta.push(FORMALITY_LABEL[q.formality] || '');
     openSheet(
-      '<h3>' + (isSched ? '예약 발행' : '발행 완료') + '</h3>' +
+      '<h3>' + (isSched ? '예약 발행' : statusLabel(q)) + '</h3>' +
       '<p class="sh-sub">' + esc(relDay(q.at)) + ' ' + hhmm(q.at) + ' · ' + meta.join(' · ') + (q.auto ? ' · 자동 생성' : '') + '</p>' +
       '<div class="sheet-body">' +
         '<div class="card flat" style="margin-top:14px"><p class="dtext">' + esc(q.text) + '</p></div>' +
-        '<div class="row" style="margin-top:12px"><span class="tag ' + (isSched ? 'accent' : 'ok') + '">' + (isSched ? '예약됨' : '발행 완료') + '</span>' +
-        '<span class="small">' + (isSched ? untilText(q.at) + ' 발행' : (q.publishedAt ? hhmm(q.publishedAt) + ' 발행' : '')) + '</span></div>' +
-        (isSched ? '<p class="fine" style="margin-top:10px">이 시각이 지나면 자동으로 발행되고 로그에 기록됩니다. (데모: 실제 게시 없음)</p>' : '') +
+        '<div class="row" style="margin-top:12px"><span class="tag ' + (q.status === 'published' ? 'ok' : q.status === 'failed' ? 'line' : 'accent') + '">' + statusLabel(q) + '</span>' +
+        '<span class="small">' + (q.status === 'published' && q.publishedAt ? hhmm(q.publishedAt) + ' 발행' : untilText(q.at) + ' 발행') + '</span></div>' +
+        (q.errorMessage ? '<p class="fine" style="margin-top:10px;color:var(--warn)">' + esc(q.errorMessage) + '</p>' : '') +
+        (q.status === 'scheduled' ? '<p class="fine" style="margin-top:10px">이 시각에 서버가 스레드로 발행하고 로그에 기록합니다.</p>' : '') +
+        (q.permalink ? '<div class="row" style="margin-top:10px"><a class="ext-link" href="' + esc(q.permalink) + '" target="_blank" rel="noopener noreferrer">스레드에서 보기' + icon('right', 12) + '</a></div>' : '') +
       '</div>' +
       '<div class="sheet-actions">' +
         (isSched
           ? '<button class="btn line" data-act="cancel-item" data-id="' + q.id + '">취소</button>' +
-            '<button class="btn line" data-act="edit-item" data-id="' + q.id + '">수정</button>' +
+            (q.status === 'scheduled' ? '<button class="btn line" data-act="edit-item" data-id="' + q.id + '">수정</button>' : '') +
             '<button class="btn primary" data-act="publish-now" data-id="' + q.id + '">' + icon('play', 14) + '지금 발행</button>'
           : '<button class="btn line" data-act="close-sheet">닫기</button>') +
       '</div>'
@@ -1085,7 +1219,7 @@
     if (!q) return;
     openSheet(
       '<h3>예약 수정</h3>' +
-      '<p class="sh-sub">문구와 발행 시각을 바꿀 수 있어요.</p>' +
+      '<p class="sh-sub">문구와 발행 시각을 바꿀 수 있어요. 이미 발행된 글은 수정되지 않습니다.</p>' +
       '<div class="sheet-body">' +
         '<textarea class="input" id="edit-text" rows="6" style="margin-top:14px">' + esc(q.text) + '</textarea>' +
         '<div class="row" style="margin-top:8px"><span class="small" id="edit-len">' + q.text.length + '자 / 500자</span></div>' +
@@ -1100,31 +1234,38 @@
     if (ta && lenEl) ta.addEventListener('input', () => { lenEl.textContent = ta.value.length + '자 / 500자'; });
   }
 
-  function saveEdit(id) {
+  async function saveEdit(id) {
     const q = state.queue.find(x => x.id === id);
     if (!q) return;
     const ta = $('#edit-text'), at = $('#edit-at');
-    if (ta && ta.value.trim()) q.text = ta.value.trim().slice(0, 500);
+    const body = {};
+    if (ta && ta.value.trim() && ta.value.trim() !== q.text) body.text = ta.value.trim().slice(0, 500);
     if (at && at.value) {
       const t = new Date(at.value).getTime();
-      if (!isNaN(t)) q.at = t;
+      if (!isNaN(t) && t !== q.at) body.at = new Date(t).toISOString();
     }
-    addLog('system', Date.now(), "예약 수정 · '" + excerpt(q.text, 16) + "'", q.id);
-    save();
-    closeSheet(true);
-    render();
-    toast('예약을 수정했어요', relDay(q.at) + ' ' + hhmm(q.at));
+    if (!Object.keys(body).length) { closeSheet(true); return; }
+    try {
+      await api('/api/posts/' + encodeURIComponent(id), { method: 'PATCH', body: body });
+      await Promise.all([loadPosts(), loadLogs()]);
+      save(); closeSheet(true); render();
+      toast('예약을 수정했어요', relDay(q.at) + ' ' + hhmm(q.at));
+    } catch (e) {
+      toast('수정하지 못했어요', errText(e), 'warn');
+    }
   }
 
-  function cancelItem(id) {
+  async function cancelItem(id) {
     const q = state.queue.find(x => x.id === id);
     if (!q) return;
-    q.status = 'canceled';
-    addLog('system', Date.now(), "예약 취소 · '" + excerpt(q.text, 16) + "'", null);
-    save();
-    closeSheet(true);
-    render();
-    toast('예약을 취소했어요', excerpt(q.text, 14));
+    try {
+      await api('/api/posts/' + encodeURIComponent(id) + '/cancel', { method: 'POST', body: {} });
+      await Promise.all([loadPosts(), loadLogs()]);
+      save(); closeSheet(true); render();
+      toast('예약을 취소했어요', excerpt(q.text, 14));
+    } catch (e) {
+      toast('취소하지 못했어요', errText(e), 'warn');
+    }
   }
 
   /* ---------------------------------------------------------------- 뷰: 로그인/회원가입 */
@@ -1139,7 +1280,7 @@
       '<button type="button" class="soc-row" data-act="social" data-p="' + s.id + '">' +
         '<span class="soc-dot" style="background:' + s.bg + ';color:' + s.fg + '">' + s.ch + '</span>' +
         '<span class="soc-lab">' + s.label + '</span>' +
-        '<span class="tag">데모</span></button>').join('') + '</div>';
+        '<span class="tag">준비 중</span></button>').join('') + '</div>';
   }
 
   // 편집: 로그인·회원가입 상단 워드마크 아래 운영사 표기
@@ -1149,7 +1290,7 @@
 
   function authFooterNote() {
     return '<div class="auth-foot">' +
-      '<p class="auth-note">' + icon('shield', 12) + '데모 · 실제 인증 서버 없음, 입력한 정보는 이 기기 브라우저에만 저장됩니다</p>' +
+      '<p class="auth-note">' + icon('shield', 12) + '비밀번호는 암호화되어 저장되고, 로그인 세션은 안전한 쿠키로 유지됩니다</p>' +
       '<p class="auth-op">' + OP_LINE + '</p>' +
     '</div>';
   }
@@ -1168,7 +1309,7 @@
         '<div class="mark-lg">' + markSvg(26) + '</div>' +
         '<h1>ThreadPilot</h1>' +
         authByline() +
-        '<p class="auth-copy">스레드는 알아서 돌아갑니다.<br>내 계정 설정은 로그인한 계정에 그대로 남아요.</p>' +
+        '<p class="auth-copy">스레드는 알아서 돌아갑니다.<br>내 계정 설정은 서버에 저장되고 어느 기기에서나 그대로 이어져요.</p>' +
       '</div>' +
       '<form class="auth-form" id="login-form" novalidate>' +
         '<label class="fl" for="login-email">이메일</label>' +
@@ -1194,7 +1335,7 @@
         '<div class="mark-lg">' + markSvg(26) + '</div>' +
         '<h1>14일 무료로 시작</h1>' +
         authByline() +
-        '<p class="auth-copy">카드 등록 없이 모든 기능을 써 볼 수 있어요.<br>가입하면 계정 정보와 설정이 이 기기에 저장됩니다.</p>' +
+        '<p class="auth-copy">카드 등록 없이 모든 기능을 써 볼 수 있어요.<br>계정 정보와 설정은 서버에 안전하게 저장됩니다.</p>' +
       '</div>' +
       '<form class="auth-form" id="signup-form" novalidate>' +
         '<label class="fl" for="signup-name">이름</label>' +
@@ -1219,22 +1360,61 @@
   }
 
   /* ---------------------------------------------------------------- 뷰: 연결 */
+  // Threads OAuth 콜백은 /#/connect?status=connected&handle=… 또는 ?status=error&reason=… 로 돌아옵니다.
+  let connectResult = null;
+  function readConnectResult() {
+    const raw = (location.hash || '').replace(/^#\/?/, '');
+    const qi = raw.indexOf('?');
+    if (qi === -1) return;
+    const params = new URLSearchParams(raw.slice(qi + 1));
+    const status = params.get('status');
+    if (!status) return;
+    connectResult = { status: status, handle: params.get('handle') || '', reason: params.get('reason') || '' };
+    // 주소창에서 결과 파라미터를 지워 새로고침해도 같은 토스트가 반복되지 않게 합니다.
+    history.replaceState(null, '', location.pathname + '#/connect');
+  }
+  const CONNECT_ERROR_TEXT = {
+    access_denied: '메타 로그인 창에서 권한 승인을 취소하셨어요. 다시 시도해 주세요.',
+    invalid_state: '연결 요청 시간이 지났어요. 다시 연결해 주세요.',
+    oauth_failed: '메타 쪽에서 연결을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.',
+    needs_reauth: '연결이 만료됐어요. 다시 연결해 주세요.'
+  };
+
   function viewConnect() {
     const acc = activeAccount();
+    const today0 = dayStart(), today1 = today0 + DAY;
+    const todays = state.queue.filter(q => q.at >= today0 && q.at < today1 && q.status !== 'canceled').sort((a, b) => a.at - b.at).slice(0, 3);
+    const failed = connectResult && connectResult.status === 'error';
+    const sampleRows = '<div class="qc-row"><span class="qc-time">08:00</span><span class="qc-text">오늘 아침 수업, 끝나고 다들 바닥에…</span><span class="qc-state">발행됨</span></div>' +
+      '<div class="qc-row"><span class="qc-time">12:30</span><span class="qc-text">크로스핏은 잘하는 사람이 하는 게 아니라…</span><span class="qc-state">발행됨</span></div>' +
+      '<div class="qc-row"><span class="qc-time">19:00</span><span class="qc-text">무게보다 자세야. 자세가 무너지면…</span><span class="qc-state wait">대기</span></div>';
+    const rows = todays.length
+      ? todays.map(q => '<div class="qc-row"><span class="qc-time">' + hhmm(q.at) + '</span><span class="qc-text">' + esc(excerpt(q.text, 22)) + '</span><span class="qc-state ' + (q.status === 'published' ? '' : 'wait') + '">' + (q.status === 'published' ? '발행됨' : '대기') + '</span></div>').join('')
+      : sampleRows;
     return '<div class="onboard">' +
       '<div class="mark-lg">' + markSvg(26) + '</div>' +
       '<p class="onboard-kicker">' + opLogo(13) + '<span>ThreadPilot · ' + OPERATOR.studio + '</span></p>' +
       '<h1>스레드는 알아서<br>돌아갑니다</h1>' +
       '<p class="lead">주제와 말투만 정해두면 정한 시간에 글이 올라가고,<br>댓글에는 같은 톤으로 답글이 달립니다.</p>' +
+
+      (failed
+        ? '<div class="card flat" style="margin-bottom:14px;border-color:rgba(255,59,92,.28)"><p style="font-size:13px;font-weight:700">연결하지 못했어요</p>' +
+          '<p class="small" style="margin-top:6px">' + esc(CONNECT_ERROR_TEXT[connectResult.reason] || ('메타 로그인을 마치지 못했어요(' + connectResult.reason + ').')) + '</p>' +
+          '<p class="fine" style="margin-top:8px">메타 앱이 개발 모드인 동안에는 테스터로 등록된 계정만 연결됩니다. 승인된 계정으로 다시 시도하거나 운영사에 문의해 주세요.</p></div>'
+        : '') +
+
       '<div class="queue-card">' +
-        '<div class="qc-head"><span>오늘의 예약</span><span class="qc-badge">3건</span></div>' +
-        '<div class="qc-row"><span class="qc-time">08:00</span><span class="qc-text">오늘 아침 수업, 끝나고 다들 바닥에…</span><span class="qc-state">발행됨</span></div>' +
-        '<div class="qc-row"><span class="qc-time">12:30</span><span class="qc-text">크로스핏은 잘하는 사람이 하는 게 아니라…</span><span class="qc-state">발행됨</span></div>' +
-        '<div class="qc-row"><span class="qc-time">19:00</span><span class="qc-text">무게보다 자세야. 자세가 무너지면…</span><span class="qc-state wait">대기</span></div>' +
-        '<div class="qc-foot">' + icon('check', 12, 2.4) + '댓글 3건에 자동 답글까지 — 손 안 대고 끝났습니다</div>' +
+        '<div class="qc-head"><span>오늘의 예약</span><span class="qc-badge">' + (todays.length ? todays.length + '건' : '예시') + '</span></div>' +
+        rows +
+        '<div class="qc-foot">' + icon('check', 12, 2.4) + (todays.length ? '서버가 정한 시간에 발행하고, 댓글에는 자동으로 답글을 답니다' : '연결하면 오늘의 예약이 여기에 실제로 표시됩니다') + '</div>' +
       '</div>' +
-      '<button class="btn primary block" data-act="connect-open">스레드로 계속하기</button>' +
-      '<p class="fine" style="text-align:center;margin-top:10px">지금은 데모 계정으로 연결됩니다 · 실제 서비스에서는 메타(Threads) 로그인 창이 열립니다</p>' +
+
+      (acc
+        ? '<button class="btn primary block" data-act="nav" data-to="home">홈으로 가기</button>' +
+          '<p class="fine" style="text-align:center;margin-top:10px">연결된 계정: ' + esc(acc.name) + ' ' + esc(acc.handle) + (acc.needsReauth ? ' · 재연결 필요' : '') + '</p>' +
+          '<button class="btn line block" style="margin-top:10px" data-act="connect-open">다른 계정 연결</button>'
+        : '<button class="btn primary block" data-act="connect-open">스레드로 계속하기</button>' +
+          '<p class="fine" style="text-align:center;margin-top:10px">메타(Threads) 로그인 창에서 권한을 승인하면 연결됩니다 · 비밀번호는 우리가 받지 않습니다</p>') +
 
       '<div class="help-line">' +
         '<span class="hl-ic">' + icon('info', 14) + '</span>' +
@@ -1247,14 +1427,14 @@
         '<div class="flow-head">연결은 이렇게 진행돼요</div>' +
         '<ul class="steps">' +
           '<li><span class="n done">' + icon('check', 11, 2.6) + '</span><div><b>우리 서비스 가입</b> — 완료</div></li>' +
-          '<li><span class="n">2</span><div><b>스레드 계정 권한 승인</b> — 메타 로그인 창에서 직접 로그인합니다. 우리는 비밀번호를 받지 않습니다</div></li>' +
+          '<li><span class="n' + (acc ? ' done' : '') + '">' + (acc ? icon('check', 11, 2.6) : '2') + '</span><div><b>스레드 계정 권한 승인</b> — 메타 로그인 창에서 직접 로그인합니다. 우리는 비밀번호를 받지 않습니다</div></li>' +
           '<li><span class="n">3</span><div><b>주제 · 말투 설정</b> — 하루 발행 횟수와 시간대</div></li>' +
           '<li><span class="n">4</span><div><b>자동 발행</b> — 초안 승인 없이 알아서, 알림만</div></li>' +
         '</ul>' +
         (acc ? '<p class="small" style="margin-top:16px">이미 연결된 계정: ' + esc(acc.name) + ' ' + esc(acc.handle) + '</p>' : '') +
         '<div class="connect-sign">' +
           '<p class="cs-line">' + opLogo(13) + '<span>Powered by <b>' + OPERATOR.ko + '</b></span><span class="cs-en">' + OPERATOR.en + '</span></p>' +
-          '<p class="cs-sub">© 2026 ThreadPilot · ' + OPERATOR.studio + ' · 데모 프로토타입</p>' +
+          '<p class="cs-sub">© 2026 ThreadPilot · ' + OPERATOR.studio + '</p>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -1407,7 +1587,7 @@
 
       '<h2>생성된 초안' + (drafts.length ? '<span class="link">' + drafts.length + '개</span>' : '') + '</h2>' +
       list +
-      '<p class="fine" style="margin-top:16px">데모에서는 템플릿 조합으로 만듭니다. 실제 서비스에서는 LLM이 계정의 과거 글을 학습해 톤을 맞춥니다.</p>' +
+      '<p class="fine" style="margin-top:16px">초안은 이 기기에서 문장 틀을 조합해 만듭니다. 예약하는 순간 서버(D1)에 저장되고, 발행은 서버가 처리합니다.</p>' +
     '</div>';
   }
 
@@ -1477,7 +1657,7 @@
           (l.qid ? '<button class="log-open" data-act="item" data-id="' + l.qid + '">문구 보기</button>' : '') +
           '</div></div>').join('') + '</div>').join('')
         : '<div class="card" style="margin-top:16px"><p class="small">기록이 없어요.</p></div>') +
-      '<p class="fine" style="margin-top:18px">데모 모드 · 실제 스레드에는 게시되지 않으며 발행 기록만 시뮬레이션합니다.</p>' +
+      '<p class="fine" style="margin-top:18px">서버가 발행·답글을 처리할 때마다 기록됩니다. 60초마다 자동으로 새로고칩니다.</p>' +
     '</div>';
   }
 
@@ -1487,15 +1667,16 @@
     const acc = activeAccount();
     const plan = PLANS[state.plan] || PLANS.trial;
     const trialLeft = trialLeftDays();
-    const me = auth.session || {};
+    const profile = state.me || {};
     const formality = s.formality === 'formal' ? 'formal' : 'casual';
 
     const acctRows = state.accounts.map(a =>
       '<div class="acct-row"><span class="avatar" style="background:' + a.color + ';width:34px;height:34px;font-size:13px">' + esc(a.name.slice(0, 1)) + '</span>' +
-      '<div><div class="acct-name">' + esc(a.name) + '</div><div class="acct-h">' + esc(a.handle) + '</div></div>' +
+      '<div><div class="acct-name">' + esc(a.name) + (a.needsReauth ? ' <span class="tag" style="vertical-align:middle">재연결 필요</span>' : '') + '</div><div class="acct-h">' + esc(a.handle) + '</div></div>' +
       '<span class="acct-state">' + (a.id === state.active
         ? '<span class="tag accent">대표</span>'
-        : '<button class="btn xs" data-act="switch-acct" data-id="' + a.id + '">대표로</button>') + '</span></div>').join('');
+        : '<button class="btn xs" data-act="switch-acct" data-id="' + a.id + '">대표로</button>') +
+        '<button class="btn xs" data-act="disconnect-acct" data-id="' + a.id + '" aria-label="연결 해제" style="margin-left:6px">해제</button></span></div>').join('');
 
     return '<div class="page">' +
       '<h1>설정<span class="sub">지금은 <b>' + FORMALITY_LABEL[formality] + '</b> 모드예요 · 초안과 자동 답글이 함께 바뀝니다</span></h1>' +
@@ -1503,20 +1684,20 @@
       '<div class="sec-label">내 정보</div>' +
       '<div class="set-card">' +
         '<div class="prof-row">' +
-          '<span class="prof-av">' + esc((me.name || '?').slice(0, 1)) + '</span>' +
-          '<div class="prof-body"><div class="prof-name">' + esc(me.name || '이름 없음') + '</div>' +
-          '<div class="prof-mail">' + esc(me.email || '이메일 없음') + '</div></div>' +
+          '<span class="prof-av">' + esc((profile.name || '?').slice(0, 1)) + '</span>' +
+          '<div class="prof-body"><div class="prof-name">' + esc(profile.name || '이름 없음') + '</div>' +
+          '<div class="prof-mail">' + esc(profile.email || '이메일 없음') + '</div></div>' +
           '<span class="tag ' + (state.plan === 'trial' ? 'accent' : 'ok') + '">' + (state.plan === 'trial' ? 'D-' + trialLeft : '구독 중') + '</span>' +
         '</div>' +
         '<div class="set-row static"><span class="ic">' + icon('shield', 16) + '</span>' +
-        '<div><div class="lab">로그인 상태</div><div class="desc">이 기기에만 저장됨 · 데모 인증</div></div>' +
+        '<div><div class="lab">로그인 상태</div><div class="desc">서버 세션 · 로그아웃하면 종료됩니다</div></div>' +
         '<span class="val">' + icon('check', 16, 2.2) + '</span></div>' +
       '</div>' +
 
       '<div class="sec-label">계정</div>' +
-      '<div class="set-card">' + acctRows +
+      '<div class="set-card">' + (acctRows || '<div class="acct-row"><span class="acct-h">아직 연결된 Threads 계정이 없어요</span></div>') +
         '<button class="set-row" data-act="connect-open"><span class="ic">' + icon('plus', 16) + '</span>' +
-        '<div><div class="lab">계정 추가</div><div class="desc">스레드 계정을 더 연결합니다</div></div>' +
+        '<div><div class="lab">계정 연결</div><div class="desc">스레드 계정을 연결합니다</div></div>' +
         '<span class="val">' + icon('right', 15) + '</span></button>' +
       '</div>' +
       '<p class="fine" style="margin-top:8px;padding-left:2px">새 글은 대표 계정으로 발행되고, 예약은 연결된 계정 모두에서 공유됩니다.</p>' +
@@ -1584,169 +1765,103 @@
       '<div class="set-card">' +
         '<div class="set-row static"><span class="ic">' + icon('info', 16) + '</span>' +
         '<div><div class="lab">홈 화면에 추가</div><div class="desc">공유 → 홈 화면에 추가 (PWA)</div></div></div>' +
-        '<button class="set-row" data-act="reset"><span class="ic">' + icon('refresh', 16) + '</span>' +
-        '<div><div class="lab">데모 데이터 초기화</div><div class="desc">계정 연결·예약·로그를 지우고 처음으로 (로그인 유지)</div></div></button>' +
+        '<div class="set-row static"><span class="ic">' + icon('refresh', 16) + '</span>' +
+        '<div><div class="lab">서버 동기화</div><div class="desc">설정·예약·로그는 서버에 저장되고 60초마다 새로고칩니다</div></div></div>' +
         '<div class="set-row static"><span class="ic">' + icon('shield', 16) + '</span>' +
-        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 0.9.3 (프로토타입)</div></div></div>' +
+        '<div><div class="lab">버전</div><div class="desc">ThreadPilot 1.0.0</div></div></div>' +
       '</div>' +
 
       '<div class="sec-label">' + esc(OP_LINE) + '</div>' +
       '<div class="set-card">' +
         '<button class="set-row" data-act="nav" data-to="admin"><span class="ic">' + opLogo(16) + '</span>' +
-        '<div><div class="lab">붐비다 관리자 콘솔</div><div class="desc">고객 계정 · 자동 발행 상태 관리</div></div>' +
+        '<div><div class="lab">붐비다 관리자 콘솔</div><div class="desc">고객 계정 · 자동 발행 상태 관리 (운영자 전용)</div></div>' +
         '<span class="val"><span class="tag accent">관리자</span></span></button>' +
         '<div class="set-row static"><span class="ic">' + icon('info', 16) + '</span>' +
-        '<div><div class="lab">데모 · 로컬 시뮬레이션</div><div class="desc">실제 서버 DB 연동 전 화면입니다</div></div></div>' +
+        '<div><div class="lab">데이터 저장 위치</div><div class="desc">Cloudflare D1 (서버) · 초안만 이 기기에 임시 저장</div></div></div>' +
       '</div>' +
 
       '<button class="btn line block" data-act="logout" style="margin-top:16px;color:var(--accent-deep)">' + icon('user', 16) + '로그아웃</button>' +
-      '<p class="fine" style="margin-top:12px">' + (me.email ? esc(me.email) + ' 로 로그인됨 · ' : '') + '데모 모드입니다. 실제 스레드 계정에는 게시되지 않습니다.</p>' +
+      '<p class="fine" style="margin-top:12px">' + (state.me && state.me.email ? esc(state.me.email) + ' 로 로그인됨 · ' : '') + '정한 시간에 서버가 스레드로 발행합니다.</p>' +
       operatorFooter() +
     '</div>';
   }
 
   /* ------------------------------------------------------- 뷰: 관리자 콘솔
-     운영자용 화면(#/admin). 실제 서버·DB 연동 전 단계라 고객·발행·오류 값은
-     이 브라우저(localStorage)에서만 도는 로컬 시뮬레이션입니다. 실제 고객
-     데이터로 오해되지 않도록 화면 상단에 '데모 · 로컬 시뮬레이션' 배지를 둡니다.
-     실서비스에서는 운영자 역할 검사 + 서버 API가 필요합니다(PLAN.md 7장).
+     운영자용 화면(#/admin). 서버의 /api/admin/* (role='admin' + tp_admin 쿠키)를
+     그대로 읽습니다. 권한이 없으면 401/403을 받아 안내 배너만 보여 줍니다.
   ------------------------------------------------------------------------ */
-  const ADMIN_KEY = 'threadpilot.admin.v1';
   const ADMIN_PLAN_ORDER = ['trial', 'standard', 'pro', 'agency'];
   const ADMIN_PLAN_LABEL = { trial: '체험', standard: '스탠다드', pro: '프로', agency: '에이전시' };
-  let admin = seedAdmin();
-  let admFilter = 'all';   // all | ok | paused
+  let admData = null;        // GET /api/admin/overview 결과
+  let admError = null;       // { status, message, code }
+  let admLoading = false;
+  let admFilter = 'all';     // all | ok | paused
   let admQuery = '';
 
-  // 오늘 안쪽으로 당긴 'n분 전' — 자정 직후에 열어도 오늘 KPI와 로그 날짜가 어긋나지 않게
-  function agoMin(n) {
-    return Math.max(Date.now() - n * MIN, dayStart() + MIN);
-  }
-
-  function seedAdmin() {
-    const log = (id, customerId, kind, mins, text, extra) => Object.assign({
-      id: 'al-' + id, customerId, kind, at: agoMin(mins), text, state: 'ok', retry: null
-    }, extra || {});
-    return {
-      v: 1,
-      customers: [
-        { id: 'cu-sushi', name: '스시 미도', biz: '일식 스시집', handle: '@mido.sushi', plan: 'pro', auto: true, since: '2026-08-21', trialEnds: null, color: '#1F6F5C' },
-        { id: 'cu-beauty', name: '글로우 뷰티랩', biz: '뷰티샵', handle: '@glow.lab', plan: 'standard', auto: true, since: '2026-09-14', trialEnds: null, color: '#C2489B' },
-        { id: 'cu-yoga', name: '한강 요가 스튜디오', biz: '요가원', handle: '@hangang.yoga', plan: 'agency', auto: true, since: '2026-07-03', trialEnds: null, color: '#7A5AF8' },
-        { id: 'cu-cafe', name: '카페 무드', biz: '카페', handle: '@cafe.mood', plan: 'trial', auto: false, since: '2026-11-02', trialEnds: agoMin(2880), color: '#B26A00' },
-        { id: 'cu-crossfit', name: '아이언핏 크로스핏', biz: '크로스핏 박스', handle: '@ironfit.box', plan: 'standard', auto: false, since: '2026-10-05', trialEnds: null, color: '#3B6EF6' }
-      ],
-      logs: [
-        log('1', 'cu-sushi', 'publish', 12, '오늘의 오마카세 — 홋카이도 산 우니 입고 안내'),
-        log('2', 'cu-sushi', 'reply', 18, '@sushi_lover 님 댓글에 답글 — 예약은 DM으로 받습니다'),
-        log('3', 'cu-sushi', 'publish', 46, '금요일 저녁 예약석 2자리 남았습니다'),
-        log('4', 'cu-sushi', 'reply', 52, '@mika.eats 님 댓글에 답글 — 건물 뒤 주차 3대 가능'),
-        log('5', 'cu-beauty', 'publish', 25, '가을 톤다운 컬러 — 11월 예약 오픈'),
-        log('6', 'cu-beauty', 'reply', 33, '@glow_fan 님 댓글에 답글 — 소요 시간 90분입니다'),
-        log('7', 'cu-beauty', 'publish', 74, '속눈썹 연장 신규 고객 20% 안내'),
-        log('8', 'cu-beauty', 'reply', 88, '@dayeon.h 님 댓글에 답글 — 주차 안내'),
-        log('9', 'cu-yoga', 'publish', 21, '겨울 특강 — 초보자 4주 코스 모집'),
-        log('10', 'cu-yoga', 'reply', 29, '@yoga_min 님 댓글에 답글 — 매트 대여 가능합니다'),
-        log('11', 'cu-yoga', 'publish', 96, '오전 7시 클래스 신설 — 출근 전 50분'),
-        log('12', 'cu-cafe', 'system', 61, '무료 체험 종료(D-0) — 자동 발행이 멈췄습니다', { state: 'paused' }),
-        log('13', 'cu-cafe', 'error', 62, '스레드 API 401 — 액세스 토큰 만료로 마지막 발행 실패', { state: 'error' }),
-        log('14', 'cu-crossfit', 'error', 40, '스레드 API 429 — 발행 한도 초과 (다음 슬롯에 재시도 대기)', { state: 'waiting', retry: 'waiting' }),
-        log('15', 'cu-crossfit', 'publish', 120, '오늘 19시 클래스 — 스쿼트 자세 교정'),
-        log('16', 'cu-crossfit', 'system', 70, '고객 요청으로 자동 발행 일시정지', { state: 'paused' })
-      ],
-      seq: 0
-    };
-  }
-
-  function loadAdmin() {
-    try {
-      const raw = localStorage.getItem(ADMIN_KEY);
-      const p = raw ? JSON.parse(raw) : null;
-      if (p && p.v === 1 && Array.isArray(p.customers) && Array.isArray(p.logs)) { admin = p; return; }
-      admin = seedAdmin();
-      saveAdmin();
-    } catch (e) { admin = seedAdmin(); }
-  }
-  function saveAdmin() {
-    try { localStorage.setItem(ADMIN_KEY, JSON.stringify(admin)); } catch (e) { /* ignore */ }
-  }
-  function adminLog(customerId, kind, text, state, retry) {
-    admin.logs.push({ id: uid('al-'), customerId, kind, at: Date.now(), text, state: state || 'ok', retry: retry || null });
-    if (admin.logs.length > 240) admin.logs = admin.logs.slice(-240);
-  }
-
-  // 데모 고객 목록 + 지금 로그인한 데모 계정을 같은 모양으로 정리
   function adminRows() {
-    const t0 = dayStart();
-    const rows = admin.customers.map(c => {
-      const logs = admin.logs.filter(l => l.customerId === c.id);
-      let status = c.auto ? 'active' : 'paused';
-      if (c.plan === 'trial' && c.trialEnds && c.trialEnds <= Date.now()) status = 'expired';
-      return Object.assign({}, c, {
-        posts: logs.filter(l => l.kind === 'publish' && l.at >= t0).length,
-        replies: logs.filter(l => l.kind === 'reply' && l.at >= t0).length,
-        status, me: false
-      });
-    });
-    if (isLoggedIn()) {
-      const u = sessionUser() || {};
-      const acc = activeAccount();
-      const on = !!state.settings.autoPublish;
-      rows.unshift({
-        id: 'me', me: true,
-        name: acc ? acc.name : (u.name || '내 계정'),
-        biz: '내 데모 계정',
-        handle: acc ? acc.handle : (u.email || ''),
-        plan: state.plan, auto: on, color: acc ? acc.color : '#FF3B5C',
-        status: on ? 'active' : 'paused', trialEnds: null,
-        posts: state.logs.filter(l => l.type === 'publish' && l.at >= t0).length,
-        replies: state.logs.filter(l => l.type === 'reply' && l.at >= t0).length
-      });
-    }
-    return rows;
+    const tenants = (admData && admData.tenants) || [];
+    return tenants.map((t, i) => ({
+      id: t.id,
+      name: t.businessName || t.name || '고객',
+      biz: t.industry || '',
+      handle: t.handle || t.email || '',
+      email: t.email || '',
+      plan: t.plan || 'trial',
+      accountStatus: t.status,
+      auto: !t.autoPublishPaused,
+      status: t.status === 'paused' ? 'paused' : t.status === 'canceled' ? 'canceled' : 'active',
+      posts: t.postsToday || 0,
+      replies: t.repliesToday || 0,
+      connectionStatus: t.connectionStatus || 'none',
+      lastError: t.lastError || null,
+      color: ACCOUNT_COLORS[i % ACCOUNT_COLORS.length],
+      me: !!(me && t.id === me.id)
+    }));
   }
 
   function adminStatusPill(r) {
-    if (r.status === 'expired') return '<span class="pill err">체험만료</span>';
+    if (r.status === 'canceled') return '<span class="pill err">해지</span>';
     if (r.status === 'paused') return '<span class="pill off">일시정지</span>';
+    if (r.connectionStatus === 'none') return '<span class="pill off">미연결</span>';
+    if (r.connectionStatus === 'needs_reauth') return '<span class="pill err">재연결</span>';
     return '<span class="pill done">정상</span>';
   }
 
-  // 관리자 콘솔 로그 = 데모 고객 로그 + 내 계정 로그(앱에서 실제로 쌓인 기록)
-  function adminLogRows(rows) {
-    rows = rows || adminRows();
-    const byId = {};
-    rows.forEach(r => { byId[r.id] = r; });
-    const q = admQuery.trim().toLowerCase();
-    const t0 = dayStart();
-    const list = admin.logs.filter(l => l.at >= t0).map(l => {
-      const c = byId[l.customerId] || null;
-      return {
-        id: l.id, at: l.at, kind: l.kind, text: l.text, retry: l.retry,
-        custName: c ? c.name : '고객', custStatus: c ? c.status : 'active'
-      };
-    });
-    if (isLoggedIn()) {
-      const me = byId['me'];
-      state.logs.forEach(l => {
-        if (l.type !== 'publish' && l.type !== 'reply') return;
-        if (l.at < t0) return;
-        list.push({
-          id: 'me-' + l.id, at: l.at, kind: l.type, text: l.text, retry: null,
-          custName: me ? me.name : '내 계정', custStatus: me ? me.status : 'active'
-        });
-      });
+  async function loadAdminData() {
+    if (admLoading) return;
+    admLoading = true;
+    try {
+      admData = await api('/api/admin/overview');
+      admError = null;
+    } catch (e) {
+      admData = null;
+      admError = { status: e.status, code: e.code, message: errText(e) };
+    } finally {
+      admLoading = false;
     }
+    if (currentView() === 'admin') render();
+  }
+
+  function adminLogRows(rows) {
+    const byId = {};
+    (rows || adminRows()).forEach(r => { byId[r.id] = r; });
+    const q = admQuery.trim().toLowerCase();
+    const list = ((admData && admData.logs) || []).map(l => ({
+      id: l.id, at: Date.parse(l.at), kind: l.kind === 'error' ? 'error' : l.kind, text: l.text,
+      tenantId: l.tenantId, custName: l.tenantName || (byId[l.tenantId] ? byId[l.tenantId].name : '고객'),
+      level: l.level
+    }));
     return list.filter(l => {
-      if (admFilter === 'ok' && l.custStatus !== 'active') return false;
-      if (admFilter === 'paused' && l.custStatus !== 'paused') return false;
+      const cust = byId[l.tenantId];
+      const status = cust ? cust.status : 'active';
+      if (admFilter === 'ok' && status !== 'active') return false;
+      if (admFilter === 'paused' && status !== 'paused') return false;
       if (!q) return true;
-      return ((l.text || '') + ' ' + l.custName).toLowerCase().indexOf(q) !== -1;
+      return ((l.text || '') + ' ' + (l.custName || '')).toLowerCase().indexOf(q) !== -1;
     }).sort((a, b) => b.at - a.at).slice(0, 30);
   }
 
   function openAdminPlanSheet(id) {
-    if (id === 'me') { go('pricing'); return; }
     const r = adminRows().find(x => x.id === id);
     if (!r) return;
     const opts = ADMIN_PLAN_ORDER.map(p => {
@@ -1757,45 +1872,75 @@
     }).join('');
     openSheet('<h3>요금제 변경</h3><p class="sh-sub">' + esc(r.name) + ' · ' + esc(r.handle) + '</p>' +
       '<div class="sheet-body">' + opts +
-      '<p class="fine" style="margin-top:10px">데모입니다. 결제 없이 이 기기의 상태만 바뀝니다.</p></div>' +
+      '<p class="fine" style="margin-top:10px">서버 DB의 요금제가 바로 바뀌고 감사 로그에 남 습니다. 결제 없이 운영 조치로 처리됩니다.</p></div>' +
       '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
   }
 
   function openAdminLogSheet(id) {
     const r = adminRows().find(x => x.id === id);
     if (!r) return;
-    let items;
-    if (id === 'me') {
-      items = state.logs.filter(l => l.type === 'publish' || l.type === 'reply')
-        .map(l => ({ at: l.at, kind: l.type, text: l.text, retry: null }));
-    } else {
-      items = admin.logs.filter(l => l.customerId === id)
-        .map(l => ({ at: l.at, kind: l.kind, text: l.text, retry: l.retry }));
-    }
-    items.sort((a, b) => b.at - a.at);
+    const items = ((admData && admData.logs) || []).filter(l => l.tenantId === id)
+      .map(l => ({ at: Date.parse(l.at), kind: l.kind, text: l.text, level: l.level, id: l.id }))
+      .sort((a, b) => b.at - a.at);
     const body = items.length ? items.slice(0, 40).map(l =>
-      '<div class="adm-sheet-log"><span class="adm-log-t">' + (l.at >= dayStart() ? '오늘 ' : '') + hhmm(l.at) + '</span>' +
-      (l.retry === 'done' ? '<span class="pill done">재시도 완료</span>' : l.retry === 'waiting' ? '<span class="pill err">재시도 대기</span>' : l.kind === 'error' ? '<span class="pill err">오류</span>' : '') +
-      '<p>' + esc(l.text) + '</p></div>').join('') : '<p class="small">아직 기록이 없어요.</p>';
+      '<div class="adm-sheet-log"><span class="adm-log-t">' + (l.at >= dayStart() ? '오늘 ' : relDay(l.at) + ' ') + hhmm(l.at) + '</span>' +
+      (l.kind === 'error' ? '<span class="pill err">오류</span>' : '') +
+      '<p>' + esc(l.text) + '</p></div>').join('') : '<p class="small">오늘 기록된 로그가 없어요.</p>';
     openSheet('<h3>' + esc(r.name) + '</h3>' +
       '<p class="sh-sub">' + esc(r.handle) + ' · ' + ADMIN_PLAN_LABEL[r.plan] + ' · 오늘 글 ' + r.posts + ' / 답글 ' + r.replies + '</p>' +
       '<div class="sheet-body">' + body + '</div>' +
       '<div class="sheet-actions">' +
-      (r.me ? '' : '<button class="btn line" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>') +
+      '<button class="btn line" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>' +
       '<button class="btn dark" data-act="close-sheet">닫기</button></div>');
   }
 
+  function adminDenied() {
+    const loggedIn = isLoggedIn();
+    return '<div class="card flat" style="margin-top:14px;border-color:rgba(255,59,92,.24)">' +
+      '<p style="font-size:14px;font-weight:750">관리자 권한이 필요해요</p>' +
+      '<p class="small" style="margin-top:8px">' + (loggedIn
+        ? '지금 로그인한 계정(' + esc((me && me.email) || '') + ')은 관리자 역할이 아니에요. 붐비다 운영 계정으로 로그인해야 고객 현황을 볼 수 있습니다.'
+        : '관리자 콘솔은 붐비다 운영 계정으로 로그인한 뒤에 열 수 있습니다.') + '</p>' +
+      (admError && admError.status ? '<p class="fine" style="margin-top:8px">서버 응답 · ' + admError.status + ' ' + esc(admError.code || '') + '</p>' : '') +
+      '</div>' +
+      (loggedIn
+        ? '<button class="btn line block" style="margin-top:12px" data-act="admin-reload">' + icon('refresh', 15) + '다시 확인</button>'
+        : '<button class="btn primary block" style="margin-top:12px" data-act="nav" data-to="login">로그인</button>');
+  }
+
   function viewAdmin() {
+    if (!isLoggedIn()) {
+      return '<div class="page adm">' +
+        '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="login" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
+        '<span class="adm-badge">운영자 전용</span></div>' +
+        '<h1>붐비다 관리자 콘솔<span class="sub">고객 계정과 자동 발행 상태를 한 화면에서 관리합니다</span></h1>' +
+        adminDenied() + operatorFooter() + '</div>';
+    }
+    if (!admData && !admError) {
+      if (!admLoading) setTimeout(loadAdminData, 0);
+      return '<div class="page adm">' +
+        '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="settings" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
+        '<span class="adm-badge">실시간 · D1</span></div>' +
+        '<h1>붐비다 관리자 콘솔<span class="sub">고객 계정과 자동 발행 상태를 한 화면에서 관리합니다</span></h1>' +
+        '<div class="card flat" style="margin-top:14px"><p class="small">고객 데이터를 불러오는 중이에요…</p></div>' + operatorFooter() + '</div>';
+    }
+    if (admError) {
+      return '<div class="page adm">' +
+        '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="settings" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
+        '<span class="adm-badge">실시간 · D1</span></div>' +
+        '<h1>붐비다 관리자 콘솔<span class="sub">고객 계정과 자동 발행 상태를 한 화면에서 관리합니다</span></h1>' +
+        adminDenied() + operatorFooter() + '</div>';
+    }
+
     const rows = adminRows();
     const q = admQuery.trim().toLowerCase();
     const hit = r => !q || (r.name + ' ' + r.biz + ' ' + r.handle).toLowerCase().indexOf(q) !== -1;
     const shown = rows.filter(r => hit(r) && (admFilter === 'all' ||
       (admFilter === 'ok' ? r.status === 'active' : r.status === 'paused')));
-    const activeCount = rows.filter(r => r.status === 'active').length;
-    const mrr = rows.reduce((sum, r) => sum + (r.status === 'active' ? ((PLANS[r.plan] || {}).price || 0) : 0), 0);
+    const kpis = admData.kpis || { activeTenants: 0, mrrKrw: 0, publishedToday: 0, errorsPending: 0 };
     const posts = rows.reduce((sum, r) => sum + r.posts, 0);
     const replies = rows.reduce((sum, r) => sum + r.replies, 0);
-    const waiting = admin.logs.filter(l => l.retry === 'waiting').length;
+    const waiting = kpis.errorsPending || 0;
     const filters = [['all', '전체'], ['ok', '정상'], ['paused', '일시정지']];
 
     const kpi = (label, v, unit, sub, cls) =>
@@ -1805,26 +1950,21 @@
     const cards = shown.map(r => {
       const pl = PLANS[r.plan] || PLANS.trial;
       const sw = '<span class="adm-sw ' + (r.auto ? 'on' : '') + '"><i></i></span>';
-      const toggle = r.status === 'expired'
-        ? ''
-        : r.me
-          ? '<button class="adm-act" data-act="adm-toggle-me" aria-label="자동 발행 일시정지/재개">' + sw + (r.auto ? '일시정지' : '재개') + '</button>'
-          : '<button class="adm-act" data-act="adm-toggle" data-id="' + r.id + '" aria-label="자동 발행 일시정지/재개">' + sw + (r.auto ? '일시정지' : '재개') + '</button>';
-      const planBtn = r.me
-        ? '<button class="adm-act" data-act="nav" data-to="pricing">요금제</button>'
-        : '<button class="adm-act" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>';
+      const toggle = '<button class="adm-act" data-act="adm-toggle" data-id="' + r.id + '" aria-label="자동 발행 일시정지/재개">' + sw + (r.auto ? '일시정지' : '재개') + '</button>';
       return '<div class="adm-card">' +
         '<div class="adm-head">' +
-          '<span class="avatar" style="background:' + esc(r.color || '#111114') + ';width:32px;height:32px;font-size:12.5px">' + esc((r.name || '?').slice(0, 1)) + '</span>' +
+          '<span class="avatar" style="background:' + esc(r.color) + ';width:32px;height:32px;font-size:12.5px">' + esc((r.name || '?').slice(0, 1)) + '</span>' +
           '<div class="adm-id"><div class="adm-name">' + esc(r.name) + (r.me ? '<span class="tag accent">현재 계정</span>' : '') + '</div>' +
-          '<div class="adm-sub2">' + esc(r.biz) + ' · ' + esc(r.handle) + '</div></div>' +
+          '<div class="adm-sub2">' + esc(r.biz || '업종 미등록') + ' · ' + esc(r.handle) + '</div></div>' +
           adminStatusPill(r) +
         '</div>' +
         '<div class="adm-meta">' +
           '<span class="tag ' + (r.plan === 'trial' ? 'line' : 'accent') + '">' + ADMIN_PLAN_LABEL[r.plan] + (pl.price ? ' · ' + (pl.price / 10000) + '만' : ' · 무료') + '</span>' +
           '<span class="adm-cnt">오늘 글 <b>' + r.posts + '</b> · 답글 <b>' + r.replies + '</b></span>' +
         '</div>' +
-        '<div class="adm-acts">' + toggle + planBtn +
+        (r.lastError ? '<p class="fine" style="margin-top:6px;color:var(--warn)">최근 오류 · ' + esc(r.lastError) + '</p>' : '') +
+        '<div class="adm-acts">' + toggle +
+          '<button class="adm-act" data-act="adm-plan" data-id="' + r.id + '">요금제 변경</button>' +
           '<button class="adm-act" data-act="adm-logs" data-id="' + r.id + '">로그 보기</button></div>' +
       '</div>';
     }).join('');
@@ -1833,29 +1973,27 @@
     const logHtml = logItems.length ? logItems.map(l => {
       const ic = l.kind === 'publish' ? 'pub' : l.kind === 'reply' ? 'rep' : 'sys';
       const icName = l.kind === 'publish' ? 'send' : l.kind === 'reply' ? 'chat' : 'refresh';
-      const pill = l.retry === 'done' ? '<span class="pill done">재시도 완료</span>'
-        : l.retry === 'waiting' ? '<span class="pill err">재시도 대기</span>'
-          : l.kind === 'error' ? '<span class="pill err">오류</span>'
-            : l.kind === 'system' ? '<span class="pill off">상태 변경</span>'
-              : '<span class="pill done">정상</span>';
+      const pill = l.kind === 'error' || l.level === 'error' ? '<span class="pill err">오류</span>'
+        : l.kind === 'system' ? '<span class="pill off">상태 변경</span>'
+          : '<span class="pill done">정상</span>';
       return '<div class="adm-log"><span class="log-ic ' + ic + '">' + icon(icName, 15) + '</span>' +
         '<div class="adm-log-main"><div class="adm-log-top"><b>' + esc(l.custName) + '</b>' +
         '<span class="adm-log-t">' + hhmm(l.at) + '</span>' + pill + '</div>' +
         '<div class="adm-log-text">' + esc(l.text) + '</div>' +
-        (l.retry === 'waiting' ? '<button class="log-open" data-act="adm-retry" data-id="' + l.id + '">지금 재시도</button>' : '') +
+        (l.kind === 'error' ? '<button class="log-open" data-act="adm-retry" data-id="' + l.id + '">다시 시도</button>' : '') +
         '</div></div>';
     }).join('') : '<p class="small">조건에 맞는 로그가 없어요.</p>';
 
     return '<div class="page adm">' +
-      '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="' + (isLoggedIn() ? 'settings' : 'login') + '" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
-      '<span class="adm-badge">데모 · 로컬 시뮬레이션</span></div>' +
+      '<div class="adm-top"><button class="adm-back" data-act="nav" data-to="settings" aria-label="뒤로 가기">' + icon('left', 18) + '</button>' +
+      '<span class="adm-badge">실시간 · D1</span></div>' +
       '<h1>붐비다 관리자 콘솔<span class="sub">고객 계정과 자동 발행 상태를 한 화면에서 관리합니다</span></h1>' +
-      '<div class="adm-note"><b>데모 · 로컬 시뮬레이션</b> — 실제 서버 DB 연동 전 화면입니다. 고객·발행·오류 값은 이 기기 브라우저(localStorage)에만 저장되고, 실제 스레드 계정이나 붐비다 서버와 연결되지 않습니다.</div>' +
+      '<div class="adm-note"><b>실시간 데이터</b> — Cloudflare D1의 고객·예약·답글 기록을 그대로 읽습니다. 정지·요금제 변경은 서버에 즉시 반영되고 감사 로그에 남습니다.</div>' +
       '<div class="adm-kpis">' +
-        kpi('활성 고객', activeCount, '곳', '전체 ' + rows.length + '곳 중') +
-        kpi('이번 달 구독(MRR)', (mrr / 10000).toFixed(1), '만원', '정상 고객 월 합계') +
-        kpi('오늘 전체 발행', posts, '건', '답글 ' + replies + '건 별도') +
-        kpi('오류 · 재시도 대기', waiting, '건', waiting ? '재시도 필요' : '오류 없음', waiting ? 'alert' : '') +
+        kpi('활성 고객', kpis.activeTenants, '곳', '체험·구독 포함') +
+        kpi('이번 달 구독(MRR)', (kpis.mrrKrw / 10000).toFixed(1), '만원', '정상 구독 월 합계') +
+        kpi('오늘 전체 발행', kpis.publishedToday, '건', '답글 ' + replies + '건 별도') +
+        kpi('오류 · 재시도 대기', waiting, '건', waiting ? '확인이 필요해요' : '오류 없음', waiting ? 'alert' : '') +
       '</div>' +
       '<div class="adm-bar">' +
         '<div class="adm-search">' + icon('search', 16) +
@@ -1866,19 +2004,49 @@
       (cards || '<div class="card flat"><p class="small">조건에 맞는 고객이 없어요.</p></div>') +
       '<div class="sec-label">최근 발행 · 오류 로그 <span class="adm-count">' + logItems.length + '건</span></div>' +
       '<div class="card flat adm-logs">' + logHtml + '</div>' +
-      '<button class="btn line block" data-act="adm-reset" style="margin-top:14px">' + icon('refresh', 15) + '시뮬레이션 데이터 초기화</button>' +
-      '<p class="fine" style="margin-top:10px">실서비스에서는 운영자 역할(권한) 검사와 서버 API가 필요합니다. 이 화면은 데모 흐름 확인용입니다.</p>' +
+      '<button class="btn line block" data-act="admin-reload" style="margin-top:14px">' + icon('refresh', 15) + '새로고침</button>' +
+      '<p class="fine" style="margin-top:10px">고객 글 원문은 기본으로 마스킹됩니다. 관리자 조작은 모두 admin_audit_logs에 기록됩니다.</p>' +
       operatorFooter() +
     '</div>';
   }
 
   /* ---------------------------------------------------------------- 뷰: 자동 답글 */
+  const INTENT_LABEL = { price: '가격 문의', location: '위치 문의', first_visit: '첫 방문', praise: '칭찬', other: '일반' };
+
+  function replyStatusPill(r) {
+    if (r.status === 'sent') return '<span class="pill done">답글 전송</span>';
+    if (r.status === 'pending') return '<span class="pill wait">답글 대기</span>';
+    if (r.status === 'escalated') return '<span class="pill err">사람 확인</span>';
+    if (r.status === 'failed') return '<span class="pill err">전송 실패</span>';
+    if (r.status === 'skipped') return '<span class="pill off">건너뜀</span>';
+    return '';
+  }
+
   function viewReplies() {
     const r = state.settings.replies;
+    const formality = state.settings.formality || 'casual';
     const delayOpts = ['즉시', '1분', '5분'];
+    const counts = state.replyCounts || { sent: 0, pending: 0, escalated: 0, failed: 0 };
+    const list = (state.replies || []).slice().sort((a, b) => b.receivedAt - a.receivedAt);
+
+    const rows = list.map(item => {
+      const canSend = item.status === 'pending' || item.status === 'escalated' || item.status === 'failed';
+      const text = item.autoReplyText || (item.intent === 'other' ? '남겨주신 댓글 확인하고 답변드릴게요.' : replyFor(intentKey(item.intent), r.tone, formality));
+      return '<div class="reply-card">' +
+        '<div class="comment"><span class="cmm-av">' + esc((item.author || '?').replace(/^@/, '').slice(0, 1).toUpperCase()) + '</span>' +
+        '<div><div class="cmm-who">' + esc(item.author ? '@' + item.author : '댓글') + ' <span style="color:var(--muted2);font-weight:600">· ' + esc(relDay(item.receivedAt)) + ' ' + hhmm(item.receivedAt) + '</span></div>' +
+        '<div class="cmm-txt">' + esc(item.text) + '</div></div></div>' +
+        '<div class="reply-preview"><div class="rp-head">' + icon('spark', 12) + (item.status === 'sent' ? '보낸 답글' : '자동 답글 초안') + ' · ' + (TONE_LABEL[r.tone] || '') + ' · ' + FORMALITY_LABEL[formality] + '</div>' +
+        '<div class="rp-body">' + esc(text) + '</div></div>' +
+        '<div class="reply-actions">' + replyStatusPill(item) +
+        (item.errorCode ? '<span class="small" style="margin-left:8px;color:var(--warn)">' + esc(item.errorCode) + '</span>' : '') +
+        (canSend ? '<button class="btn sm" data-act="send-reply" data-id="' + item.id + '" ' + (r.enabled ? '' : 'disabled') + '>' + icon('send', 13) + '지금 답글 달기</button>' : '') +
+        '</div></div>';
+    }).join('');
+
     return '<div class="page">' +
       '<h1>댓글 자동 답글<span class="sub">댓글이 달리면 정한 톤으로 답글을 답니다</span></h1>' +
-      '<div class="mode-banner">' + icon('chat', 14) + '답글은 <b>' + (TONE_LABEL[r.tone] || '') + ' · ' + FORMALITY_LABEL[state.settings.formality || 'casual'] + '</b>로 나가요' +
+      '<div class="mode-banner">' + icon('chat', 14) + '답글은 <b>' + (TONE_LABEL[r.tone] || '') + ' · ' + FORMALITY_LABEL[formality] + '</b>로 나가요' +
         '<button class="link-btn" data-act="nav" data-to="settings">바꾸기</button></div>' +
 
       '<div class="card" style="margin-top:14px"><div class="row">' +
@@ -1888,9 +2056,9 @@
       '<div class="sec-label">답글 말투 <span style="font-weight:600;color:var(--muted2)">· 발행 글과 같이 적용</span></div>' +
       '<div class="card flat">' +
         '<div class="seg">' +
-          FORMALITIES.map(f => '<button class="' + ((state.settings.formality || 'casual') === f.id ? 'on' : '') + '" data-act="formality" data-f="' + f.id + '">' + f.label + '</button>').join('') +
+          FORMALITIES.map(f => '<button class="' + (formality === f.id ? 'on' : '') + '" data-act="formality" data-f="' + f.id + '">' + f.label + '</button>').join('') +
         '</div>' +
-        '<p class="small" style="margin-top:9px">' + (FORMALITIES.find(f => f.id === (state.settings.formality || 'casual')) || FORMALITIES[0]).hint + '</p>' +
+        '<p class="small" style="margin-top:9px">' + (FORMALITIES.find(f => f.id === formality) || FORMALITIES[0]).hint + '</p>' +
         '<div class="sec-label" style="margin:14px 0 8px">톤</div>' +
         '<div class="seg">' +
           TONES.map(t => '<button class="' + (r.tone === t.id ? 'on' : '') + '" data-act="rtone" data-tone="' + t.id + '">' + t.label + '</button>').join('') +
@@ -1899,30 +2067,45 @@
 
       '<div class="sec-label">응답 시점</div>' +
       '<div class="chips">' + delayOpts.map(d => '<button class="chip ' + (r.delay === d ? 'on' : '') + '" data-act="delay" data-d="' + d + '">' + d + '</button>').join('') + '</div>' +
+      '<p class="fine" style="margin-top:8px">수집은 서버가 주기적으로 합니다. 무료 플랜은 발행·댓글 확인이 몇 분 늦을 수 있어요.</p>' +
 
       '<div class="card" style="margin-top:16px;background:var(--soft);border-color:transparent">' +
         '<div style="display:flex;gap:9px"><span style="color:var(--muted)">' + icon('info', 16) + '</span>' +
         '<p class="small" style="color:var(--ink2)">가격·위치·체험 문의는 자주 묻는 질문으로 인식해 정해진 답을 쓰고, 그 외 댓글은 톤에 맞춰 답합니다. DM 자동 응답은 Threads 공식 API에 권한이 없어 지원하지 않습니다.</p></div>' +
       '</div>' +
 
-      '<h2>샘플 댓글 미리보기<span class="link">' + SAMPLE_COMMENTS.length + '개</span></h2>' +
+      '<h2>수집된 댓글<span class="link">' + list.length + '건</span></h2>' +
+      '<div class="row" style="gap:6px;margin-bottom:10px">' +
+        '<span class="tag ok">답글 ' + counts.sent + '</span>' +
+        '<span class="tag line">대기 ' + counts.pending + '</span>' +
+        '<span class="tag line">사람 확인 ' + counts.escalated + '</span>' +
+        (counts.failed ? '<span class="tag accent">실패 ' + counts.failed + '</span>' : '') +
+      '</div>' +
+      (rows
+        ? '<div class="stack">' + rows + '</div>'
+        : '<div class="card"><p class="small">아직 수집된 댓글이 없어요. Threads 계정을 연결하고 글이 발행되면 서버가 댓글을 확인해 여기에 쌓입니다.</p></div>') +
+
+      '<h2>예시 미리보기<span class="link">' + SAMPLE_COMMENTS.length + '개</span></h2>' +
       '<div class="stack">' + SAMPLE_COMMENTS.map(c => {
-        const sent = state.sentReplies.indexOf(c.id) !== -1;
         return '<div class="reply-card">' +
           '<div class="comment"><span class="cmm-av">' + esc(c.initial) + '</span>' +
           '<div><div class="cmm-who">' + esc(c.who) + ' <span style="color:var(--muted2);font-weight:600">· ' + c.at + '</span></div>' +
           '<div class="cmm-txt">' + esc(c.text) + '</div></div></div>' +
-          '<div class="reply-preview"><div class="rp-head">' + icon('spark', 12) + '자동 답글 · ' + (TONE_LABEL[r.tone] || '') + ' · ' + FORMALITY_LABEL[state.settings.formality || 'casual'] + '</div>' +
-          '<div class="rp-body">' + esc(replyFor(c.intent, r.tone, state.settings.formality)) + '</div></div>' +
-          '<div class="reply-actions">' + (sent
-            ? '<span class="sent-badge">' + icon('check', 13, 2.4) + '전송 완료</span>'
-            : '<button class="btn sm" data-act="send-reply" data-id="' + c.id + '" ' + (r.enabled ? '' : 'disabled') + '>' + icon('send', 13) + '지금 답글 달기</button>') +
-          '</div></div>';
+          '<div class="reply-preview"><div class="rp-head">' + icon('spark', 12) + '예시 답글 · ' + (TONE_LABEL[r.tone] || '') + ' · ' + FORMALITY_LABEL[formality] + '</div>' +
+          '<div class="rp-body">' + esc(replyFor(c.intent, r.tone, formality)) + '</div></div>' +
+          '</div>';
       }).join('') + '</div>' +
-      '<p class="fine" style="margin-top:16px">데모 · 실제 댓글에 답글을 달지 않습니다.</p>' +
+      '<p class="fine" style="margin-top:16px">예시는 말투·톤을 바꾸면 바로 달라집니다. 실제 답글은 위 목록의 댓글에만 나갑니다.</p>' +
     '</div>';
   }
 
+  function intentKey(intent) {
+    if (intent === 'price') return 'price';
+    if (intent === 'location') return 'place';
+    if (intent === 'first_visit') return 'first';
+    if (intent === 'praise') return 'praise';
+    return 'price';
+  }
   /* ---------------------------------------------------------------- 뷰: 요금제 */
   function planCard(p) {
     const now = state.plan === p.id;
@@ -1954,14 +2137,14 @@
     return '<div class="page">' +
       '<h1>요금제<span class="sub">계정 수에 맞춰 고르면 됩니다</span></h1>' +
       '<div class="plan-now"><div style="flex:1"><div class="pl">현재 플랜</div><div class="pn">' + esc(plan.name) + '</div>' +
-        '<div class="pd">' + (state.plan === 'trial' ? '무료 체험 ' + left + '일 남음 · 카드 등록 없음' : '월 ' + won(plan.price) + '원 · 다음 결제일 12월 17일') + '</div></div>' +
+        '<div class="pd">' + (state.plan === 'trial' ? '무료 체험 ' + left + '일 남음 · 카드 등록 없음' : '월 ' + won(plan.price) + '원') + '</div></div>' +
         '<span class="tag solid">' + (state.plan === 'trial' ? 'D-' + left : '사용 중') + '</span></div>' +
 
       planCard(PLANS.trial) + planCard(PLANS.standard) + planCard(PLANS.pro) + planCard(PLANS.agency) +
 
       '<div class="card" style="margin-top:16px;background:var(--soft);border-color:transparent">' +
         '<p class="small" style="color:var(--ink2)">모든 플랜에 예약 발행, AI 초안, 댓글 자동 답글이 포함됩니다. 실제 서비스에서는 카드 등록 후 매월 자동 결제되고, 언제든 해지할 수 있습니다.</p></div>' +
-      '<p class="fine" style="margin-top:12px">데모 · 플랜을 선택해도 실제 결제는 일어나지 않습니다.</p>' +
+      '<p class="fine" style="margin-top:12px">카드 결제는 연결 준비 중입니다. 무료 체험 기간에는 모든 기능을 그대로 쓸 수 있어요.</p>' +
       operatorFooter() +
     '</div>';
   }
@@ -1978,13 +2161,13 @@
     settings: viewSettings,
     replies: viewReplies,
     pricing: viewPricing,
-    admin: viewAdmin          // 운영자용 관리자 콘솔(데모 · #/admin 직접 접근 가능)
+    admin: viewAdmin          // 운영자용 관리자 콘솔(서버 권한 확인 · #/admin 직접 접근 가능)
   };
   const AUTH_VIEWS = { login: 1, signup: 1 };
 
   function currentView() {
     const raw = (location.hash || '').replace(/^#\/?/, '').split('?')[0];
-    // 관리자 콘솔은 데모라 로그인 전에도 바로 열립니다(실서비스에서는 운영자 권한 검사 필요).
+    // 관리자 콘솔은 로그인 전에도 열리지만, 데이터는 서버가 권한을 확인한 뒤에만 나옵니다.
     if (raw === 'admin') return 'admin';
     if (!isLoggedIn()) return raw === 'signup' ? 'signup' : 'login';
     if (AUTH_VIEWS[raw]) return state.onboarded ? 'home' : 'connect';
@@ -2042,36 +2225,132 @@
   /* ---------------------------------------------------------------- 동작 */
   const BANNED_DEFAULT_TEXT = '';
 
+  /** 규칙(설정) 저장 — 화면은 먼저 바뀌고, 실패하면 서버 값으로 되돌립니다. */
+  async function saveSetting(patch, message) {
+    save();
+    render();
+    try {
+      const rule = await api('/api/rules', { method: 'PATCH', body: patch });
+      applyRule(rule);
+      save();
+    } catch (e) {
+      toast('설정을 저장하지 못했어요', errText(e), 'warn');
+      try { await loadRules(); } catch (err) { /* 오프라인이면 마지막 값을 그대로 둡니다 */ }
+    }
+    render();
+    if (message) toast(message, null, 'ok');
+  }
+
   function addTopic() {
     const i = $('#topic-input'); if (!i) return;
     const v = i.value.trim(); if (!v) return;
-    if (state.settings.topics.indexOf(v) === -1 && state.settings.topics.length < 8) state.settings.topics.push(v);
+    if (state.settings.topics.indexOf(v) !== -1) { i.value = ''; return; }
+    if (state.settings.topics.length >= 8) { toast('주제는 8개까지예요'); return; }
+    state.settings.topics.push(v);
     i.value = '';
-    save(); render();
-    toast('주제 추가', v, 'ok');
+    saveSetting({ topics: state.settings.topics }, '주제 추가 · ' + v);
   }
   function addBan() {
     const i = $('#ban-input'); if (!i) return;
     const v = i.value.trim(); if (!v) return;
-    if (state.settings.banned.indexOf(v) === -1) state.settings.banned.push(v);
+    if (state.settings.banned.indexOf(v) !== -1) { i.value = ''; return; }
+    state.settings.banned.push(v);
     i.value = '';
-    save(); render();
+    saveSetting({ banned: state.settings.banned });
   }
   function addSlot() {
     const i = $('#slot-input'); if (!i) return;
     const v = i.value; if (!v) return;
-    if (state.settings.slots.indexOf(v) === -1 && state.settings.slots.length < 5) {
-      state.settings.slots.push(v);
-      state.settings.slots.sort();
-    }
-    save(); render();
+    if (state.settings.slots.indexOf(v) !== -1) return;
+    if (state.settings.slots.length >= 10) { toast('시간대는 10개까지예요'); return; }
+    state.settings.slots = state.settings.slots.concat([v]).sort();
+    saveSetting({ slots: state.settings.slots });
   }
 
   function toggleAuto() {
-    state.settings.autoPublish = !state.settings.autoPublish;
-    if (state.settings.autoPublish) { ensureFill(true); }
-    save(); render();
-    toast(state.settings.autoPublish ? '완전 자동 발행 켜짐' : '초안 승인 모드로 바뀜', state.settings.autoPublish ? '이번 주 슬롯을 채웠어요' : null, 'ok');
+    const next = !state.settings.autoPublish;
+    state.settings.autoPublish = next;
+    saveSetting({ autoPublish: next }, next ? '완전 자동 발행 켜짐' : '초안 승인 모드로 바뀜');
+  }
+
+  async function sendReplyNow(id) {
+    try {
+      await api('/api/replies/' + encodeURIComponent(id) + '/send', { method: 'POST', body: {} });
+      await Promise.all([loadReplies(), loadLogs()]);
+      render();
+      toast('답글을 보냈어요', '스레드에 실제로 올라갔습니다', 'ok');
+    } catch (e) {
+      toast('답글을 보내지 못했어요', errText(e), 'warn');
+      try { await loadReplies(); render(); } catch (err) { /* 무시 */ }
+    }
+  }
+
+  async function switchAccount(id) {
+    const a = accountById(id);
+    if (!a) return;
+    try {
+      await api('/api/threads/accounts/' + encodeURIComponent(id), { method: 'PATCH', body: { isPrimary: true } });
+      await Promise.all([loadAccounts(), loadPosts()]);
+      render();
+      toast(a.name + ' 대표 계정으로 설정', null, 'ok');
+    } catch (e) {
+      toast('변경하지 못했어요', errText(e), 'warn');
+    }
+  }
+
+  async function disconnectAccount(id) {
+    try {
+      await api('/api/threads/accounts/' + encodeURIComponent(id), { method: 'DELETE' });
+      await Promise.all([loadAccounts(), loadPosts(), loadLogs()]);
+      closeSheet(true);
+      render();
+      toast('연결을 해제했어요', '이 계정의 예약은 취소됩니다', 'ok');
+      if (!state.accounts.length) go('connect');
+    } catch (e) {
+      toast('해제하지 못했어요', errText(e), 'warn');
+    }
+  }
+
+  async function adminToggleTenant(id) {
+    const r = adminRows().find(x => x.id === id);
+    if (!r) return;
+    try {
+      await api('/api/admin/tenants/' + encodeURIComponent(id), {
+        method: 'PATCH', body: { autoPublishPaused: r.auto, reason: 'admin_console' }
+      });
+      await loadAdminData();
+      toast(r.auto ? '자동 발행 일시정지' : '자동 발행 재개', r.name, 'ok');
+    } catch (e) {
+      toast('변경하지 못했어요', errText(e), 'warn');
+    }
+  }
+
+  async function adminPlanPick(id, plan) {
+    if (!PLANS[plan]) return;
+    try {
+      await api('/api/admin/tenants/' + encodeURIComponent(id), { method: 'PATCH', body: { plan: plan, reason: 'admin_console' } });
+      closeSheet(true);
+      await loadAdminData();
+      toast('요금제를 바꿨어요', ADMIN_PLAN_LABEL[plan], 'ok');
+    } catch (e) {
+      toast('변경하지 못했어요', errText(e), 'warn');
+    }
+  }
+
+  async function adminRetry(id, confirmDuplicate) {
+    try {
+      await api('/api/admin/logs/' + encodeURIComponent(id) + '/retry', { method: 'POST', body: { confirmDuplicate: !!confirmDuplicate } });
+      await loadAdminData();
+      toast('재시도 예약', '다음 크론에서 다시 발행을 시도합니다', 'ok');
+    } catch (e) {
+      if (e.code === 'confirm_required') {
+        openSheet('<h3>이미 발행됐을 수 있어요</h3><p class="sh-sub">결과가 불확실한 발행입니다. 다시 시도하면 같은 글이 두 번 올라갈 수 있습니다.</p>' +
+          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
+          '<button class="btn primary" data-act="adm-retry-confirm" data-id="' + esc(id) + '">중복을 확인했어요</button></div>');
+        return;
+      }
+      toast('재시도하지 못했어요', errText(e), 'warn');
+    }
   }
 
   function generateDrafts() {
@@ -2108,13 +2387,7 @@
     switch (act) {
       case 'nav': go(el.dataset.to); break;
       case 'connect-open': openConnectSheet(); break;
-      case 'acct-pick': {
-        sheetPick = Number(el.dataset.i) || 0;
-        const root = $('#sheet-root');
-        root.querySelectorAll('[data-pick]').forEach(v => { v.innerHTML = Number(v.dataset.pick) === sheetPick ? icon('check', 18, 2.2) : ''; });
-        break;
-      }
-      case 'connect-confirm': connectConfirm(); break;
+      case 'connect-confirm': startThreadsConnect(); break;
       case 'gen': generateDrafts(); break;
       case 'schedule': openScheduleSheet(el.dataset.id); break;
       case 'slot-pick': {
@@ -2136,18 +2409,26 @@
       case 'prev-week': state.week = (state.week || 0) - 1; save(); render(); break;
       case 'next-week': state.week = (state.week || 0) + 1; save(); render(); break;
       case 'log-filter': logFilter = el.dataset.f; render(); break;
-      case 'tone': state.settings.tone = el.dataset.tone; save(); render(); break;
-      case 'rtone': state.settings.replies.tone = el.dataset.tone; save(); render(); break;
+      case 'tone':
+        state.settings.tone = el.dataset.tone;
+        saveSetting({ tone: state.settings.tone });
+        break;
+      case 'rtone':
+        state.settings.replies.tone = el.dataset.tone;
+        saveSetting({ replyTone: state.settings.replies.tone });
+        break;
       case 'formality': {
         const f = el.dataset.f === 'formal' ? 'formal' : 'casual';
         if (state.settings.formality === f) break;
         state.settings.formality = f;
-        save(); render();
-        toast(FORMALITY_LABEL[f] + '로 바뀜', '새로 만드는 초안·답글부터 적용돼요', 'ok');
+        saveSetting(
+          { formality: f, replyFormality: f },
+          FORMALITY_LABEL[f] + '로 바뀜'
+        );
         break;
       }
       case 'logout':
-        openSheet('<h3>로그아웃할까요?</h3><p class="sh-sub">저장된 설정과 예약은 이 브라우저에 남아 있고, 같은 이메일로 다시 로그인하면 그대로 이어집니다.</p>' +
+        openSheet('<h3>로그아웃할까요?</h3><p class="sh-sub">설정과 예약은 서버에 남아 있고, 같은 이메일로 다시 로그인하면 그대로 이어집니다.</p>' +
           '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
           '<button class="btn primary" data-act="logout-confirm">로그아웃</button></div>');
         break;
@@ -2157,159 +2438,86 @@
           '<p class="sh-sub">여기서 찾는 건 <b>우리 서비스 로그인 비밀번호</b>예요. 스레드(메타) 계정 비밀번호와는 별개입니다.</p>' +
           '<div class="sheet-body">' +
             '<div class="set-card" style="margin-top:14px">' +
-              '<div class="set-row static"><span class="ic" style="background:var(--accent-soft);color:var(--accent)">' + icon('user', 15) + '</span>' +
-              '<div><div class="lab" style="font-size:13px">ThreadPilot 계정</div><div class="desc">가입한 이메일로 재설정 링크를 보내는 기능입니다</div></div></div>' +
               '<div class="set-row static"><span class="ic">' + icon('info', 15) + '</span>' +
-              '<div><div class="lab" style="font-size:13px;color:var(--warn)">데모 · 실제 재설정 메일은 발송되지 않습니다</div>' +
-              '<div class="desc">서버가 없어 메일 발송을 건너뜁니다. 기억이 안 나면 새 이메일로 회원가입해 테스트하세요</div></div></div>' +
+              '<div><div class="lab" style="font-size:13px">비밀번호 재설정</div><div class="desc">지금은 운영사에 문의해 주세요. 메일 재설정 링크는 준비 중입니다.</div></div></div>' +
             '</div>' +
             '<div class="help-line" style="margin-top:14px">' +
               '<span class="hl-ic">' + icon('info', 14) + '</span>' +
               '<div><p class="hl-t">스레드(메타) 계정 비밀번호를 찾으시나요?</p>' +
               '<a class="ext-link" href="https://accountscenter.instagram.com/password_reset/" target="_blank" rel="noopener noreferrer">메타 계정 복구 페이지로 이동' + icon('right', 12) + '</a>' +
-              '<p class="hl-d">그건 우리 서비스가 보관하지 않는 비밀번호라 메타 사이트에서 직접 재설정해야 합니다. 스레드 계정 연결 화면에도 같은 링크가 있습니다.</p></div>' +
+              '<p class="hl-d">그건 우리 서비스가 보관하지 않는 비밀번호라 메타 사이트에서 직접 재설정해야 합니다.</p></div>' +
             '</div>' +
           '</div>' +
           '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
         break;
       case 'social': socialLogin(el.dataset.p); break;
-      case 'social-continue': socialContinue(el.dataset.p); break;
-      case 'delay': state.settings.replies.delay = el.dataset.d; save(); render(); break;
+      case 'social-continue': socialContinue(); break;
+      case 'delay':
+        state.settings.replies.delay = el.dataset.d;
+        saveSetting({ replyDelay: delaySeconds(el.dataset.d) });
+        break;
       case 'toggle-replies':
         state.settings.replies.enabled = !state.settings.replies.enabled;
-        save(); render();
-        toast(state.settings.replies.enabled ? '자동 답글 켜짐' : '자동 답글 꺼짐', null, 'ok');
+        saveSetting({ replyEnabled: state.settings.replies.enabled },
+          state.settings.replies.enabled ? '자동 답글 켜짐' : '자동 답글 꺼짐');
         break;
       case 'add-topic': addTopic(); break;
       case 'del-topic':
         state.settings.topics = state.settings.topics.filter(t => t !== el.dataset.t);
         if (!state.settings.topics.length) state.settings.topics = ['오늘'];
-        save(); render(); break;
+        saveSetting({ topics: state.settings.topics });
+        break;
       case 'add-ban': addBan(); break;
       case 'del-ban':
         state.settings.banned = state.settings.banned.filter(t => t !== el.dataset.t);
-        save(); render(); break;
+        saveSetting({ banned: state.settings.banned });
+        break;
       case 'add-slot': addSlot(); break;
       case 'del-slot':
         state.settings.slots = state.settings.slots.filter(t => t !== el.dataset.t);
-        save(); render(); break;
+        saveSetting({ slots: state.settings.slots });
+        break;
       case 'per-inc':
         state.settings.perDay = Math.min(5, state.settings.perDay + 1);
-        save(); render(); break;
+        saveSetting({ perDay: state.settings.perDay });
+        break;
       case 'per-dec':
         state.settings.perDay = Math.max(1, state.settings.perDay - 1);
-        save(); render(); break;
+        saveSetting({ perDay: state.settings.perDay });
+        break;
       case 'toggle-auto': toggleAuto(); break;
-      case 'fill-week':
-        ensureFill(true); save(); render();
-        toast('이번 주 슬롯을 채웠어요', '빈 시간대만 채웁니다', 'ok');
-        break;
-      case 'send-reply': {
-        const c = SAMPLE_COMMENTS.find(x => x.id === el.dataset.id);
-        if (!c) break;
-        state.sentReplies.push(c.id);
-        addLog('reply', Date.now(), c.who + ' 댓글에 자동 답글 전송', null);
-        save(); render();
-        toast('답글을 보냈어요', c.who, 'ok');
-        break;
-      }
-      case 'switch-acct': {
+      case 'fill-week': fillWeek(); break;
+      case 'send-reply': sendReplyNow(el.dataset.id); break;
+      case 'switch-acct': switchAccount(el.dataset.id); break;
+      case 'disconnect-acct': {
         const a = accountById(el.dataset.id);
         if (!a) break;
-        state.active = a.id; save(); render();
-        toast(a.name + ' 대표 계정으로 설정', null, 'ok');
+        openSheet('<h3>' + esc(a.name) + ' 연결을 해제할까요?</h3>' +
+          '<p class="sh-sub">' + esc(a.handle) + '의 예약 중인 글은 모두 취소되고, 저장된 토큰은 즉시 삭제됩니다.</p>' +
+          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
+          '<button class="btn primary" data-act="disconnect-confirm" data-id="' + esc(a.id) + '">연결 해제</button></div>');
         break;
       }
+      case 'disconnect-confirm': disconnectAccount(el.dataset.id); break;
       case 'choose-plan': {
         const p = PLANS[el.dataset.p];
         if (!p) break;
-        openSheet('<h3>' + p.name + ' 플랜으로 변경</h3>' +
-          '<p class="sh-sub">월 ' + won(p.price) + '원 · 계정 ' + p.accounts + '개. 데모에서는 결제가 일어나지 않고 플랜만 바뀝니다.</p>' +
+        openSheet('<h3>' + p.name + ' 플랜</h3>' +
+          '<p class="sh-sub">월 ' + won(p.price) + '원 · 계정 ' + p.accounts + '개</p>' +
           '<div class="sheet-body"><ul class="plan-feats" style="margin-top:16px">' +
-          p.feats.map(f => '<li>' + icon('check', 13, 2.4) + '<span>' + f + '</span></li>').join('') + '</ul></div>' +
-          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
-          '<button class="btn primary" data-act="plan-confirm" data-p="' + p.id + '">변경</button></div>');
+          p.feats.map(f => '<li>' + icon('check', 13, 2.4) + '<span>' + f + '</span></li>').join('') + '</ul>' +
+          '<p class="fine" style="margin-top:14px">카드 결제는 아직 연결 전이에요. 지금은 무료 체험으로 모든 기능을 쓸 수 있고, 유료 전환은 운영사에 문의해 주세요.</p></div>' +
+          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
         break;
       }
-      case 'plan-confirm': {
-        const p = PLANS[el.dataset.p];
-        state.plan = p.id; save(); closeSheet(true); render();
-        toast(p.name + ' 플랜으로 바뀌었어요', p.price ? '월 ' + won(p.price) + '원' : '무료', 'ok');
-        break;
-      }
-      case 'adm-toggle': {
-        const c = admin.customers.find(x => x.id === el.dataset.id);
-        if (!c) break;
-        const row = adminRows().find(x => x.id === c.id);
-        if (row && row.status === 'expired') {
-          toast('무료 체험이 끝났어요', '요금제를 바꿔 주세요', 'warn');
-          openAdminPlanSheet(c.id);
-          break;
-        }
-        c.auto = !c.auto;
-        adminLog(c.id, 'system', c.auto ? '자동 발행 재개' : '자동 발행 일시정지', c.auto ? 'ok' : 'paused');
-        saveAdmin();
-        render();
-        toast(c.auto ? '자동 발행을 다시 켰어요' : '자동 발행 일시정지', c.name, 'ok');
-        break;
-      }
-      case 'adm-toggle-me': toggleAuto(); break;
+      case 'adm-toggle': adminToggleTenant(el.dataset.id); break;
       case 'adm-plan': openAdminPlanSheet(el.dataset.id); break;
-      case 'adm-plan-pick': {
-        const c = admin.customers.find(x => x.id === el.dataset.id);
-        const p = el.dataset.plan;
-        if (!c || !PLANS[p]) break;
-        const wasExpired = c.plan === 'trial' && c.trialEnds && c.trialEnds <= Date.now();
-        c.plan = p;
-        c.trialEnds = p === 'trial' ? Date.now() + 14 * DAY : null;
-        if (p === 'trial' || wasExpired) c.auto = true;   // 만료된 체험을 유료로 바꾸면 발행을 다시 켭니다
-        adminLog(c.id, 'system', '요금제를 ' + ADMIN_PLAN_LABEL[p] + '로 바꿨습니다', 'ok');
-        saveAdmin();
-        closeSheet(true);
-        render();
-        toast('요금제를 바꿨어요', c.name + ' · ' + ADMIN_PLAN_LABEL[p] + (PLANS[p].price ? ' ' + (PLANS[p].price / 10000) + '만원' : ''), 'ok');
-        break;
-      }
+      case 'adm-plan-pick': adminPlanPick(el.dataset.id, el.dataset.plan); break;
       case 'adm-logs': openAdminLogSheet(el.dataset.id); break;
       case 'adm-filter': admFilter = el.dataset.f; render(); break;
-      case 'adm-retry': {
-        const l = admin.logs.find(x => x.id === el.dataset.id);
-        if (!l || l.retry !== 'waiting') break;
-        l.retry = 'done';
-        l.state = 'ok';
-        adminLog(l.customerId, 'publish', '재시도 성공 — 대기하던 글이 발행됐습니다', 'ok');
-        saveAdmin();
-        render();
-        toast('재시도 성공', '대기하던 글 1건이 발행됐어요', 'ok');
-        break;
-      }
-      case 'adm-reset':
-        openSheet('<h3>시뮬레이션 초기화</h3><p class="sh-sub">데모 고객 5곳과 발행·오류 로그를 처음 상태로 되돌립니다. 내 앱 설정과 예약은 그대로입니다.</p>' +
-          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
-          '<button class="btn primary" data-act="adm-reset-confirm">초기화</button></div>');
-        break;
-      case 'adm-reset-confirm':
-        admin = seedAdmin();
-        saveAdmin();
-        closeSheet(true);
-        render();
-        toast('초기화했어요', '데모 고객·로그를 처음 상태로', 'ok');
-        break;
-      case 'reset':
-        openSheet('<h3>데모 데이터 초기화</h3><p class="sh-sub">계정 연결, 예약, 로그, 설정이 지워지고 처음 단계로 돌아갑니다. 로그인 상태는 유지됩니다.</p>' +
-          '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">취소</button>' +
-          '<button class="btn primary" data-act="reset-confirm">초기화</button></div>');
-        break;
-      case 'reset-confirm': {
-        const owner = state.owner, trial = state.trialStartedAt;
-        state = defaultState();
-        state.owner = owner;
-        state.trialStartedAt = trial;
-        save(); closeSheet(true);
-        location.hash = '#/connect'; render();
-        toast('초기화했어요', null, 'ok');
-        break;
-      }
+      case 'adm-retry': adminRetry(el.dataset.id, false); break;
+      case 'adm-retry-confirm': closeSheet(true); adminRetry(el.dataset.id, true); break;
+      case 'admin-reload': admData = null; admError = null; loadAdminData(); break;
     }
   }
 
@@ -2350,6 +2558,7 @@
     closeSheet(true);
     const sc = $('#screen'); if (sc) sc.scrollTop = 0;
     render();
+    if (currentView() === 'admin') loadAdminData();
   });
 
   window.addEventListener('resize', fitDevice);
@@ -2365,28 +2574,41 @@
   }
 
   /* ---------------------------------------------------------------- 부팅 */
-  load();
-  loadAuth();
-  loadAdmin();
-  if (!location.hash) {
-    location.hash = '#/' + (!isLoggedIn() ? 'login' : (state.onboarded ? 'home' : 'connect'));
+  async function boot() {
+    readConnectResult();
+    render();          // 로그인/마지막 화면을 먼저 그려 흰 화면을 줄입니다
+    fitDevice();
+    try {
+      const profile = await loadMe();
+      resetStateFor(profile);
+      await syncAll();
+      if (connectResult && connectResult.status === 'connected') {
+        toast('Threads 계정 연결 완료', connectResult.handle ? '@' + connectResult.handle : null, 'ok');
+        if (location.hash !== '#/home') location.hash = '#/home';
+      }
+    } catch (e) {
+      if (e.status !== 401) state.lastError = errText(e);
+    }
+    if (!location.hash || location.hash === '#' || location.hash === '#/login' && isLoggedIn()) {
+      location.hash = '#/' + (isLoggedIn() ? (state.onboarded ? 'home' : 'connect') : 'login');
+    }
+    render();
+    if (state.lastError) toast('데이터를 불러오지 못했어요', state.lastError, 'warn');
   }
-  if (isLoggedIn()) {
-    const u = sessionUser();
-    if (u) adoptUser(u);
-    processDue(true);
-    if (state.onboarded && state.settings.autoPublish) ensureFill(false);
-    save();
-  }
-  render();
-  fitDevice();
 
+  boot();
+
+  setInterval(syncClock, 20000);
+
+  // 서버가 처리한 발행·답글을 60초마다 화면에 반영합니다.
   setInterval(() => {
-    if (!isLoggedIn()) { syncClock(); return; }
-    const n = processDue(false);
-    if (n > 0) render();
-    else syncClock();
-  }, 20000);
+    if (!me || document.visibilityState !== 'visible') return;
+    refreshData(false);
+  }, 60000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && me) refreshData(false);
+  });
 
   // 스크롤 시 상단 경계선
   document.addEventListener('scroll', () => {

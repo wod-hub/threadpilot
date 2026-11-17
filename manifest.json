@@ -1,7 +1,7 @@
 {
   "name": "ThreadPilot — 붐비다 자동화 스튜디오",
   "short_name": "ThreadPilot",
-  "description": "붐비다(BUMBIDA)가 운영하는 스레드 자동 발행 앱. 주제와 말투만 정해두면 정한 시간에 스레드 글이 올라갑니다. 예약 발행·댓글 자동 답글 데모.",
+  "description": "붐비다(BUMBIDA)가 운영하는 스레드 자동 발행 앱. 주제와 말투만 정해두면 정한 시간에 스레드 글이 올라갑니다. 예약 발행·댓글 자동 답글.",
   "lang": "ko",
   "dir": "ltr",
   "start_url": "./index.html",
