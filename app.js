@@ -473,7 +473,7 @@
       err.status = res.status;
       err.code = info.code || 'http_' + res.status;
       err.extra = info;
-      if (res.status === 401 && me && !opts.keepSession) sessionExpired();
+      if (res.status === 401 && me && info.code === 'no_session') sessionExpired();
       throw err;
     }
     return payload ? payload.data : null;
