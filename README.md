@@ -1,91 +1,74 @@
-# ThreadPilot (데모)
+# ThreadPilot (v1.0.0)
 
-스레드 예약 발행 · 댓글 자동 답글 서비스의 **동작하는 웹 프로토타입**입니다.
-빌드 없이 정적 파일만으로 돌아가고, 상태는 브라우저 localStorage에 저장됩니다.
-**실제 스레드 계정에는 아무 것도 게시되지 않습니다**(발행은 시뮬레이션).
+붐비다(BUMBIDA)가 운영하는 **스레드 예약 발행 · 댓글 자동 답글** 앱입니다.
+정적 PWA(GitHub Pages) + Cloudflare Worker API + D1로 실제 동작합니다.
 
-- v0.9.1: 로그인/회원가입 게이트 · 반말/존댓말 토글 · 스레드 계정 연결 화면의 메타 계정 복구 링크
-- v0.9.3: 운영자용 **관리자 콘솔(`#/admin`)** 데모 — 설정 하단 `운영 · 붐비다 (BUMBIDA)` → **붐비다 관리자 콘솔**, 또는 주소 끝에 `#/admin`으로 바로 열립니다. KPI 4칸(활성 고객·이번 달 구독(MRR)·오늘 전체 발행·오류·재시도 대기), 데모 고객 5곳 + 현재 로그인 계정 카드에서 **자동 발행 일시정지/재개 · 요금제 변경 · 상세 로그 보기**가 실제로 동작하고, 오늘 발행·오류 로그를 고객·핸들·문구로 검색하고 전체/정상/일시정지로 거를 수 있습니다. 값은 `localStorage['threadpilot.admin.v1']`에만 저장되는 **로컬 시뮬레이션**(실서버 DB 연동 전, 화면 상단 배지 표기). 서비스 워커 캐시 `threadpilot-v5`
-- 브랜딩: 운영사 **붐비다 (BUMBIDA)** 표기 — 로그인/회원가입 워드마크 아래 `by 붐비다`, 연결 화면 `붐비다 자동화 스튜디오`·`Powered by 붐비다`, 설정·요금제 하단 `ThreadPilot 운영 · 붐비다 (BUMBIDA)` 푸터 (사업자번호·연락처는 임의로 넣지 않음)
+- 서비스: <https://thread.bumbida.com>
+- API: `https://thread.bumbida.com/api/*`, Threads OAuth 콜백 `https://thread.bumbida.com/oauth/threads/*`
 
----
+## 이번 버전에서 바뀐 것
 
-## 실행 방법
+이전 프로토타입은 localStorage에서만 도는 시뮬레이션이었습니다. v1.0.0은 화면을 그대로 두고
+**데이터 계층을 실제 API로 교체**했습니다.
 
-### 1) 가장 확실한 방법 — 로컬 서버
+- 회원가입 · 로그인 · 로그아웃 · 세션 복원 (서버 세션, HttpOnly 쿠키 `tp_session`)
+- Threads 계정 연결 (메타 OAuth, `GET /api/threads/oauth/start` → `/oauth/threads/callback`)
+- 자동화 규칙 저장 (`PATCH /api/rules`): 주제·금지어·말투(반말/존댓말)·톤·하루 횟수·시간대·자동 발행·답글 설정
+- 초안 예약 (`POST /api/posts`), 캘린더(`GET /api/posts`), 수정·취소·즉시 발행
+- 발행 로그 (`GET /api/logs`) — 서버가 기록한 발행·답글·오류를 그대로 표시
+- 댓글 자동 답글 (`GET /api/replies`, `POST /api/replies/:id/send`) — 수집·자동 전송은 서버 크론
+- 관리자 콘솔 `#/admin` (`GET /api/admin/overview` 등) — 권한이 없으면 401/403을 받아 안내만 표시
+- 서비스 워커: 정적 자산만 캐시, `/api/*`·`/oauth/*`는 **절대 캐시하지 않음**
 
-```bash
-cd threads-auto
-python3 -m http.server 8000
-```
+## 화면
 
-브라우저에서 <http://localhost:8000> 접속.
+해시 라우팅: `#/login` `#/signup` `#/connect` `#/home` `#/drafts` `#/calendar` `#/log` `#/settings` `#/replies` `#/pricing` `#/admin`
 
-> `http://localhost` 또는 `https`에서만 PWA(홈 화면 추가·오프라인)가 동작합니다.
-> 같은 Wi-Fi의 휴대폰에서 보려면 `http://<PC IP>:8000` 으로 열면 되지만, 이 경우 service worker는 동작하지 않습니다(HTTP라서).
+- **홈** — 오늘 발행 진행률, 다음 예약, 오늘 타임라인, 최근 알림
+- **글쓰기** — 템플릿 기반 초안 3개 생성(기기에서 생성) → 서버가 고른 빈 시간에 예약
+- **예약** — 주간 캘린더, 항목별 보기·수정·즉시 발행·취소
+- **로그** — 발행·답글·시스템 기록(서버 생성), 60초마다 새로고침
+- **설정** — 계정 연결/해제, 주제·금지어·말투·톤·발행량·시간대·자동화, 구독 상태
+- **댓글 자동 답글** — 수집된 댓글과 답글 상태, 말투/톤/응답 시점 설정, 수동 전송
+- **관리자 콘솔** — KPI, 고객 목록, 자동 발행 정지/재개, 요금제 변경, 실패 로그 재시도
 
-### 2) 파일 직접 열기
+## 데이터
 
-`index.html`을 더블클릭해도 화면은 뜹니다. 다만 브라우저에 따라 `file://`에서는 localStorage가 막혀 **새로고침하면 상태가 초기화**될 수 있습니다. 시연은 1) 방법을 권장합니다.
+- 서버(D1): 계정, Threads 연결(토큰은 AES-256-GCM 암호화), 규칙, 예약 큐, 댓글/답글, 감사 로그
+- 브라우저(localStorage): 생성한 **초안**, 캘린더 주 이동, 읽음 시각만 저장합니다.
+  새로고침하면 서버 상태를 다시 읽습니다.
 
-### 3) 휴대폰 홈 화면에 앱처럼 추가
+## 세션과 권한
 
-- iPhone(Safari): 공유 → **홈 화면에 추가**
-- Android(Chrome): ⋮ → **홈 화면에 추가** / **앱 설치**
-- HTTPS 주소(Netlify·Vercel·GitHub Pages 등에 폴더째 올리면 끝)로 열면 주소창 없는 앱처럼 실행됩니다.
+- `tp_session` (HttpOnly · Secure · SameSite=Lax, 30일) — 모든 `/api/*` 요청에 자동 전송
+- 관리자는 `role='admin'` + 별도 `tp_admin` 쿠키(8시간)가 있어야 `/api/admin/*`가 200을 돌려줍니다.
+  공개 가입으로는 관리자가 될 수 없고, 서버의 `ADMIN_SETUP_TOKEN`으로만 승격합니다.
 
----
+## API 요약
 
-## 데모 시나리오 (3분)
+| 영역 | 엔드포인트 |
+| --- | --- |
+| 인증 | `POST /api/auth/signup` · `login` · `logout`, `GET/PATCH /api/auth/me` |
+| 연결 | `GET /api/threads/oauth/start`, `GET /api/threads/accounts`, `PATCH`/`DELETE /api/threads/accounts/:id` |
+| 규칙 | `GET/PATCH /api/rules`, `GET /api/slots?n=5` |
+| 예약 | `GET/POST /api/posts`, `GET/PATCH /api/posts/:id`, `POST /api/posts/:id/cancel` · `/publish-now` |
+| 기록 | `GET /api/logs`, `GET /api/replies`, `POST /api/replies/:id/send` |
+| 관리자 | `GET /api/admin/overview` · `tenants`, `PATCH /api/admin/tenants/:id`, `POST /api/admin/logs/:id/retry`, `GET /api/admin/audit-logs` |
+| 상태 | `GET /api/health` |
 
-0. **로그인 / 회원가입** — 앱을 열면 로그인 화면. "회원가입" → 이름·이메일·비밀번호(8자 이상) → **무료 체험 시작하기**.
-   입력값은 이 브라우저에만 저장되고(비밀번호는 해시), 새로고침해도 로그인이 유지됩니다.
-   하단의 카카오/구글/Apple은 **데모** 버튼입니다(실제 OAuth 창은 열지 않음).
-1. **연결** — "스레드로 계속하기" → 권한 4개 확인 → `@lastone.training` 선택 → "데모 계정으로 연결".
-   연결 즉시 3일치 발행 기록과 이번 주 예약이 채워집니다.
-   버튼 아래 “스레드 비밀번호를 모르시나요?” 링크는 **메타 계정 복구 페이지**(새 탭)로 연결됩니다 — 우리가 비밀번호를 받는 화면이 아닙니다.
-2. **설정** — 주제·**말투(반말/존댓말)**·톤·금지어·하루 횟수·시간대를 바꿔 봅니다. (모두 저장됩니다)
-3. **글 생성** — "AI 초안 생성" → 초안 3개 → 하나를 **예약하기** → 시간 선택.
-   설정에서 말투를 바꾸고 다시 만들면 문장이 실제로 달라집니다(예: “무게보다 자세야” ↔ “무게보다 자세예요”).
-4. **예약** — 캘린더에서 이번 주를 확인 → 오늘/내일 항목 탭 → **지금 발행**.
-5. **로그** — "19:00 … 발행 완료" 기록과 상단 알림(토스트) 확인.
-6. **자동 답글** — 샘플 댓글 3개에 대한 답글 미리보기가 말투·톤에 따라 바로 바뀝니다 → "지금 답글 달기".
-7. **요금제** — 무료 체험(D-14) → 프로 변경(결제 없음).
-8. **로그아웃** — 설정 맨 아래 → 다시 로그인하면 같은 설정으로 이어집니다.
+응답 형식은 `{ ok: true, data }` / `{ ok: false, error: { code, message } }` 입니다.
 
-9. **관리자 콘솔** — 설정 맨 아래 `운영 · 붐비다 (BUMBIDA)` → **붐비다 관리자 콘솔** (또는 `#/admin`). 고객 카드에서 `일시정지`를 누르면 상태·오늘 발행 수·MRR이 바로 바뀌고, `요금제 변경`·`로그 보기`도 그 자리에서 동작합니다. 검색창에 `요가`처럼 치면 고객과 로그가 함께 걸러집니다. 새로고침해도 그대로 남습니다.
+## 개발·배포
 
-처음 상태로 되돌리려면 설정 → **데모 데이터 초기화**(로그인은 유지).
+- 이 저장소(`main`)는 GitHub Pages로 `thread.bumbida.com`에 배포됩니다.
+- `index.html`이 `app.js?v=…`, `styles.css?v=…`로 버전 쿼리를 붙입니다.
+  **정적 파일을 바꾸면 버전을 올려 주세요** — CDN·서비스 워커 캐시 때문에 같은 URL은 잠시 이전 파일이 보일 수 있습니다.
+- 로컬에서 `python3 -m http.server`로 열면 **화면만** 확인할 수 있습니다.
+  API가 `thread.bumbida.com`의 같은 출처 쿠키 세션을 쓰므로 실제 동작·로그인은 배포 도메인에서 확인합니다.
 
----
+## 참고
 
-## 폴더
-
-```
-threads-auto/
-├── index.html      # 화면 셸
-├── styles.css      # 디자인(흰 바탕 + 포인트 컬러)
-├── app.js          # 상태·라우터·화면·시트·타이머
-├── manifest.json   # PWA 설정
-├── sw.js           # 오프라인 캐시
-├── icons/          # 앱 아이콘
-├── fonts/          # Pretendard (로컬 번들, 오프라인에서도 동일한 글꼴)
-└── README.md
-```
-
----
-
-## 기술 메모
-
-- 화면: 해시 라우터(`#/login`, `#/signup`, `#/connect`, `#/home`, `#/drafts`, `#/calendar`, `#/log`, `#/settings`, `#/replies`, `#/pricing`, `#/admin`)
-- 상태: `localStorage['threadpilot.state.v1']`
-- 관리자 콘솔(데모): `localStorage['threadpilot.admin.v1']` — 데모 고객 5곳·발행/오류 로그. 실서비스에서는 운영자 권한 검사 + 서버 API가 필요합니다.
-- 인증: `localStorage['threadpilot.auth.v1']` — `users[]`(salt + SHA-256 해시) + `session`.
-  세션이 없으면 해시로 다른 화면을 열어도 로그인 화면으로 돌아갑니다. 데모 인증이며 **실제 서버·이메일 발송·OAuth는 없습니다**.
-  실서비스에서는 이메일 인증 · bcrypt/argon2 해시 · OAuth · 서버 세션 토큰이 필요합니다.
-- 말투: `state.settings.formality`(`casual` 반말 / `formal` 존댓말) — 초안 글과 댓글 자동 답글에 **동시에** 적용. 템플릿 뱅크는 말투별로 두 벌(`GEN[formality][tone]`, `REPLY_BANK[formality][tone][intent]`)이라 어미 치환으로 문장이 깨지지 않습니다.
-- 발행 처리: 20초 주기 타이머가 `scheduled` 이면서 시각이 지난 항목을 `published`로 바꾸고 로그·토스트 기록
-- 초안 생성: 네트워크 호출 없는 템플릿 조합(말투 2 × 톤 4 × 주제 3), 금지어 필터
-- 데스크톱에서 열면 390×844 휴대폰 프레임으로 표시되어 그대로 시연하기 좋습니다.
-- 운영사 브랜드 문구는 `app.js` 상단 `OPERATOR`/`OP_LINE` 상수 한 곳에 모여 있습니다(`붐비다` / `BUMBIDA` / `붐비다 자동화 스튜디오`).
-- 앱 셸을 바꾼 뒤에는 `sw.js`의 `CACHE` 값을 함께 올리세요(현재 `threadpilot-v5`).
+- 메타 앱이 개발 모드인 동안에는 앱에 등록된 테스터 계정만 Threads 연결이 됩니다.
+  연결 실패 시 화면에 한국어 안내가 표시됩니다.
+- 개인정보처리방침·이용약관·데이터 삭제 안내: `privacy.html`, `terms.html`, `data-deletion.html`
+- 운영: 붐비다 (BUMBIDA) · 붐비다 자동화 스튜디오
