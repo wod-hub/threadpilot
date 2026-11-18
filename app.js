@@ -537,6 +537,8 @@
   let state = defaultState();
   let me = null;
   const isLoggedIn = () => !!me;
+  // 운영자 콘솔은 role === 'admin' 계정에서만 노출한다(서버도 tp_admin 쿠키로 재확인).
+  const isAdmin = () => !!(state.me && state.me.role === 'admin');
   const sessionUser = () => (me ? { id: me.id, email: me.email, name: me.name, role: me.role } : null);
   const trialLeftDays = () => (me && typeof me.trialDaysLeft === 'number' ? me.trialDaysLeft : state.trialDaysLeft);
 
@@ -1359,6 +1361,12 @@
     needs_reauth: '연결이 만료됐어요. 다시 연결해 주세요.'
   };
 
+  /** 로그인한 운영자에게만 보이는 '운영자 콘솔' 바로가기 (role === 'admin'). */
+  function adminJumpBtn(extraClass) {
+    return '<button class="admin-jump' + (extraClass ? ' ' + extraClass : '') + '" data-act="nav" data-to="admin" aria-label="운영자 콘솔 열기">' +
+      opLogo(16, 'aj-logo') + '<span>운영자 콘솔</span><span class="aj-tag">관리자</span>' + icon('right', 12) + '</button>';
+  }
+
   function viewConnect() {
     const acc = activeAccount();
     const today0 = dayStart(), today1 = today0 + DAY;
@@ -1371,6 +1379,7 @@
       ? todays.map(q => '<div class="qc-row"><span class="qc-time">' + hhmm(q.at) + '</span><span class="qc-text">' + esc(excerpt(q.text, 22)) + '</span><span class="qc-state ' + (q.status === 'published' ? '' : 'wait') + '">' + (q.status === 'published' ? '발행됨' : '대기') + '</span></div>').join('')
       : sampleRows;
     return '<div class="onboard">' +
+      (isAdmin() ? '<div class="admin-entry-row">' + adminJumpBtn() + '</div>' : '') +
       '<div class="mark-lg">' + markSvg(26) + '</div>' +
       '<p class="onboard-kicker">' + opLogo(13) + '<span>ThreadPilot · ' + OPERATOR.studio + '</span></p>' +
       '<h1>스레드는 알아서<br>돌아갑니다</h1>' +
@@ -1443,6 +1452,13 @@
 
     return '<div class="page">' +
       '<h1>' + esc(acc.name) + '<span class="sub">' + esc(acc.handle) + ' · ' + (state.settings.autoPublish ? '완전 자동 발행 중' : '초안 승인 모드') + '</span></h1>' +
+
+      (isAdmin()
+        ? '<button class="admin-banner" data-act="nav" data-to="admin" aria-label="운영자 콘솔 열기">' +
+          '<span class="ab-ic">' + opLogo(18) + '</span>' +
+          '<span><span class="ab-t">운영자 콘솔</span><span class="ab-d">고객 계정 · 자동 발행 상태 관리</span></span>' +
+          '<span class="ab-go">' + icon('right', 16) + '</span></button>'
+        : '') +
 
       '<section class="hero">' +
         '<div class="row">' +
@@ -1752,9 +1768,11 @@
 
       '<div class="sec-label">' + esc(OP_LINE) + '</div>' +
       '<div class="set-card">' +
-        '<button class="set-row" data-act="nav" data-to="admin"><span class="ic">' + opLogo(16) + '</span>' +
-        '<div><div class="lab">붐비다 관리자 콘솔</div><div class="desc">고객 계정 · 자동 발행 상태 관리 (운영자 전용)</div></div>' +
-        '<span class="val"><span class="tag accent">관리자</span></span></button>' +
+        (isAdmin()
+          ? '<button class="set-row" data-act="nav" data-to="admin"><span class="ic">' + opLogo(16) + '</span>' +
+            '<div><div class="lab">운영자 콘솔</div><div class="desc">고객 계정 · 자동 발행 상태 관리 (운영자 전용)</div></div>' +
+            '<span class="val"><span class="tag accent">관리자</span></span></button>'
+          : '') +
         '<div class="set-row static"><span class="ic">' + icon('info', 16) + '</span>' +
         '<div><div class="lab">데이터 저장 위치</div><div class="desc">Cloudflare D1 (서버) · 초안만 이 기기에 임시 저장</div></div></div>' +
       '</div>' +
@@ -2163,6 +2181,7 @@
     el.className = 'topbar';
     el.innerHTML = '<div class="brand"><span class="mark">' + markSvg(14) + '</span>ThreadPilot</div>' +
       '<div class="top-actions">' +
+      (isAdmin() ? '<button class="icon-btn admin-ic" data-act="nav" data-to="admin" aria-label="운영자 콘솔" title="운영자 콘솔">' + opLogo(20) + '</button>' : '') +
       '<button class="icon-btn" data-act="nav" data-to="log" aria-label="알림">' + icon('bell', 21) + (unread ? '<span class="dot"></span>' : '') + '</button>' +
       (a ? '<div class="avatar" style="background:' + a.color + '">' + esc(a.name.slice(0, 1)) + '</div>' : '') +
       '</div>';
