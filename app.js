@@ -802,17 +802,6 @@
     toast('로그아웃했어요', '다시 로그인하면 설정이 그대로 이어져요');
   }
 
-  const SOCIAL_LABEL = { kakao: '카카오', google: '구글', apple: 'Apple' };
-  function socialLogin(provider) {
-    const label = SOCIAL_LABEL[provider] || '소셜';
-    openSheet('<h3>' + label + ' 로그인</h3>' +
-      '<p class="sh-sub">' + label + ' 계정 연동은 아직 준비 중이에요. 지금은 이메일로 가입한 계정으로 로그인해 주세요.</p>' +
-      '<div class="sheet-body"><p class="fine" style="margin-top:14px">Threads 계정 연결은 로그인 후 연결 화면에서 메타 로그인 창으로 진행됩니다.</p></div>' +
-      '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button>' +
-      '<button class="btn primary" data-act="nav" data-to="signup">이메일로 가입</button></div>');
-  }
-  function socialContinue() { socialLogin('kakao'); }
-
   /* ---------------------------------------------------------------- 유틸 */
   const $ = sel => document.querySelector(sel);
   const pad = n => String(n).padStart(2, '0');
@@ -1277,20 +1266,6 @@
   }
 
   /* ---------------------------------------------------------------- 뷰: 로그인/회원가입 */
-  const SOCIALS = [
-    { id: 'kakao', label: '카카오로 계속하기', bg: '#FEE500', fg: '#3C1E1E', ch: '카' },
-    { id: 'google', label: '구글로 계속하기', bg: '#FFFFFF', fg: '#4285F4', ch: 'G' },
-    { id: 'apple', label: 'Apple로 계속하기', bg: '#111114', fg: '#FFFFFF', ch: 'A' }
-  ];
-
-  function authSocials() {
-    return '<div class="socials">' + SOCIALS.map(s =>
-      '<button type="button" class="soc-row" data-act="social" data-p="' + s.id + '">' +
-        '<span class="soc-dot" style="background:' + s.bg + ';color:' + s.fg + '">' + s.ch + '</span>' +
-        '<span class="soc-lab">' + s.label + '</span>' +
-        '<span class="tag">준비 중</span></button>').join('') + '</div>';
-  }
-
   // 편집: 로그인·회원가입 상단 워드마크 아래 운영사 표기
   function authByline() {
     return '<p class="auth-by">' + opLogo(15) + '<span class="by-k">by</span><b>' + OPERATOR.ko + '</b><span class="by-en">' + OPERATOR.en + '</span></p>';
@@ -1331,8 +1306,6 @@
           '<button type="button" class="link-btn strong" data-act="nav" data-to="signup">회원가입</button>' +
         '</div>' +
       '</form>' +
-      '<div class="divider"><span>또는</span></div>' +
-      authSocials() +
       authFooterNote() +
     '</div>';
   }
@@ -1361,8 +1334,6 @@
         '</div>' +
       '</form>' +
       '<div class="trial-note"><span class="tag accent">D-14</span><p>가입하는 순간부터 무료 체험 14일이 시작됩니다. 끝나기 전에 알려드릴게요.</p></div>' +
-      '<div class="divider"><span>또는</span></div>' +
-      authSocials() +
       authFooterNote() +
     '</div>';
   }
@@ -2467,8 +2438,6 @@
           '</div>' +
           '<div class="sheet-actions"><button class="btn line" data-act="close-sheet">닫기</button></div>');
         break;
-      case 'social': socialLogin(el.dataset.p); break;
-      case 'social-continue': socialContinue(); break;
       case 'delay':
         state.settings.replies.delay = el.dataset.d;
         saveSetting({ replyDelay: delaySeconds(el.dataset.d) });

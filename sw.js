@@ -1,7 +1,7 @@
 /* ThreadPilot 서비스 워커 — 정적 앱 셸만 캐시합니다.
    /api/* · /oauth/* 는 절대 캐시하지 않고 항상 네트워크로 통과시킵니다.
    (세션 쿠키·OAuth 콜백·발행 결과가 캐시에 가려지면 안 됩니다) */
-const CACHE = 'threadpilot-v7';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
+const CACHE = 'threadpilot-v8';   // 앱 셸이 바뀌면 이 값을 올리세요(이전 캐시는 activate에서 삭제)
 const ASSETS = [
   './',
   './index.html',
